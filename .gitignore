@@ -1,0 +1,9 @@
+.env
+.google-service-key/
+state.db
+bot.log
+cron.log
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

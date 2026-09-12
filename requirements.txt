@@ -1,0 +1,31 @@
+praw==8.0.3
+prawcore==4.0.0
+feedparser==6.0.11
+python-dotenv==1.0.1
+requests==2.34.2
+google-auth==2.57.1
+# cryptography (a google-auth dependency) is pinned old ONLY on Intel macOS:
+# 49+ dropped macOS x86_64/universal2 wheels (arm64-only now), and there's no
+# working Xcode Command Line Tools on that kind of dev machine to compile
+# from source instead -- confirmed pip otherwise picks the newest version by
+# version number first and tries to build THAT from source, rather than
+# falling back to an older version with an available wheel, so an unpinned
+# or open-ended constraint doesn't fix this on its own. Linux (the actual
+# EC2 deployment target) has full wheel coverage for every recent version
+# on every common architecture (x86_64, aarch64, ...) -- confirmed via
+# PyPI's file listing -- so it isn't held back by this and gets the latest
+# compatible version instead.
+cryptography==48.0.1; sys_platform == "darwin" and platform_machine == "x86_64"
+cryptography>=42.0.3; sys_platform != "darwin" or platform_machine != "x86_64"
+
+# Tier 3 Google News link resolution (linkclean.GoogleNewsBrowserResolver) --
+# entirely optional, fails closed if unavailable (see that class's
+# docstring). This installs the Playwright Python API only; its actual
+# browser is a separate, much larger download that `pip install` does NOT
+# do automatically:
+#     playwright install chromium
+# On a fresh Linux box, that browser also needs some system libraries,
+# installed via (needs sudo, so deliberately not run automatically by
+# anything in this project):
+#     playwright install-deps chromium
+playwright==1.62.0

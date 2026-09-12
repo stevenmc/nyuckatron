@@ -1,0 +1,353 @@
+import time
+from types import SimpleNamespace
+
+import bot
+import config
+import linkclean
+
+
+def test_is_excluded_matches_death_notice():
+    assert bot.is_excluded("John Smith Death Notice - Newry", "Reposing at his home on Friday")
+
+
+def test_known_local_outlets_restriction_is_enabled_only_where_it_makes_sense():
+    # Re-enabled 2026-09-05 for the Google News feed specifically -- see
+    # the long comment in config.py for the full history (disabled after
+    # one production run dropped 0/6 genuinely on-topic stories, then
+    # re-enabled once news.google.com itself was added to
+    # KNOWN_LOCAL_OUTLETS so an unresolved wrapper link no longer gets
+    # dropped by this check). BBC News NI and Newry.ie never needed it --
+    # their own docstrings in config.py explain why -- and stay off.
+    by_name = {feed["name"]: feed for feed in config.FEEDS}
+    assert by_name["BBC News NI"]["restrict_to_known_local_outlets"] is False
+    assert by_name["Newry.ie"]["restrict_to_known_local_outlets"] is False
+    assert by_name["Google News - Newry area"]["restrict_to_known_local_outlets"] is True
+
+
+def test_known_local_outlets_mechanism_still_correctly_rejects_hilltown_dundee():
+    # The real incident that motivated this whole mechanism: a story from
+    # Dundee (which has its own Hilltown district) passes the keyword
+    # filter on "Hilltown" alone, but must still be identifiable as
+    # non-local once its outlet is known -- confirmed here using the exact
+    # three-argument call bot.py actually makes, including the
+    # place-name-in-domain check, to make sure that broader check doesn't
+    # accidentally let this exact case back in (thecourier.co.uk's
+    # hostname doesn't contain "hilltown" -- only the URL path does, which
+    # this check deliberately never looks at).
+    feed = next(f for f in config.FEEDS if f["name"] == "Google News - Newry area")
+
+    title = "New housing planned for Hilltown area"
+    summary = ""
+    dundee_url = "https://www.thecourier.co.uk/fp/news/dundee/12345/hilltown-housing/"
+
+    haystack = (title + " " + summary).lower()
+    passed_keyword_filter = any(kw.lower() in haystack for kw in feed["keyword_filter"])
+    assert passed_keyword_filter  # confirms this is the exact failure mode -- keyword alone isn't enough
+
+    assert not linkclean.is_allowed_domain(
+        dundee_url, config.KNOWN_LOCAL_OUTLETS, config.KNOWN_LOCAL_OUTLET_SUFFIXES, config.CATCHMENT_PLACES
+    )
+
+
+def test_saoradh_is_not_in_known_local_outlets():
+    # Deliberate exclusion, not an oversight -- see config.py's note on the
+    # Irish political party additions. Checked against both its real
+    # domain (saoradh.irish) and the .ie one it's sometimes mistakenly
+    # assumed to use, so a future edit can't reintroduce it by guessing.
+    assert not linkclean.is_allowed_domain("https://saoradh.irish/x", config.KNOWN_LOCAL_OUTLETS)
+    assert not linkclean.is_allowed_domain("https://saoradh.ie/x", config.KNOWN_LOCAL_OUTLETS)
+
+
+def test_is_excluded_matches_property_for_sale():
+    assert bot.is_excluded("3-bed house for sale in Newry, guide price £180,000", "")
+
+
+def test_is_excluded_matches_advertorial():
+    assert bot.is_excluded("New cafe opens in Newry city centre", "Advertorial in association with Cafe Co")
+
+
+def test_is_excluded_leaves_ordinary_news_alone():
+    assert not bot.is_excluded(
+        "Newry City slump to three-goal defeat at home to Glenavon", "Match report"
+    )
+
+
+def _fake_parsed(entries, bozo_exception=None):
+    return SimpleNamespace(entries=entries, bozo_exception=bozo_exception)
+
+
+def _struct_time_days_ago(days):
+    return time.gmtime(time.time() - days * 86400)
+
+
+# --- news-age limiter (_is_too_old / MAX_NEWS_AGE_DAYS) ------------------
+
+def test_is_too_old_true_for_an_entry_older_than_the_limit():
+    entry = SimpleNamespace(published_parsed=_struct_time_days_ago(config.MAX_NEWS_AGE_DAYS + 1))
+    assert bot._is_too_old(entry)
+
+
+def test_is_too_old_false_for_a_recent_entry():
+    entry = SimpleNamespace(published_parsed=_struct_time_days_ago(0))
+    assert not bot._is_too_old(entry)
+
+
+def test_is_too_old_false_when_no_date_field_is_present():
+    # Can't verify the age at all -- don't drop it over that, matching
+    # this project's fail-open bias elsewhere.
+    entry = SimpleNamespace()
+    assert not bot._is_too_old(entry)
+
+
+def test_is_too_old_falls_back_to_updated_parsed_when_published_parsed_is_missing():
+    entry = SimpleNamespace(updated_parsed=_struct_time_days_ago(config.MAX_NEWS_AGE_DAYS + 1))
+    assert bot._is_too_old(entry)
+
+
+def test_fetch_entries_drops_an_entry_older_than_max_news_age_days(monkeypatch):
+    # Regression test for a real, not just theoretical, case: newry.ie's own
+    # feed has at least one entry whose pubDate is from 2022.
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Test Feed", "url": "http://example.com/rss", "keyword_filter": ["newry"]}],
+    )
+    entries = [
+        SimpleNamespace(
+            title="Newry story from 2022", link="http://example.com/1", summary="",
+            published_parsed=time.gmtime(0),  # 1970 -- absurdly old, unambiguous
+        ),
+        SimpleNamespace(
+            title="Newry story from today", link="http://example.com/2", summary="",
+            published_parsed=_struct_time_days_ago(0),
+        ),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = [title for title, *_ in bot.fetch_entries()]
+
+    assert results == ["Newry story from today"]
+
+
+# --- max_entries (per-feed alternative to the age check) -----------------
+
+def test_fetch_entries_max_entries_takes_only_the_first_n_in_feed_order(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Test Feed", "url": "http://example.com/rss", "keyword_filter": ["newry"], "max_entries": 2}],
+    )
+    entries = [
+        SimpleNamespace(title=f"Newry story {i}", link=f"http://example.com/{i}", summary="")
+        for i in range(5)
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = [title for title, *_ in bot.fetch_entries()]
+
+    assert results == ["Newry story 0", "Newry story 1"]
+
+
+def test_fetch_entries_max_entries_skips_the_age_check_entirely(monkeypatch):
+    # The whole point of max_entries: for a feed whose own pubDate is
+    # unreliable, an absurdly old date on an entry that's still within the
+    # first N by feed position must NOT get it dropped -- that would just
+    # reproduce the exact 0-survivors problem max_entries exists to fix
+    # (confirmed live for Newry.ie and Newry Democrat).
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Test Feed", "url": "http://example.com/rss", "keyword_filter": ["newry"], "max_entries": 3}],
+    )
+    entries = [
+        SimpleNamespace(
+            title="Newry story with an absurdly old (unreliable) pubDate",
+            link="http://example.com/1", summary="",
+            published_parsed=time.gmtime(0),  # 1970
+        ),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = [title for title, *_ in bot.fetch_entries()]
+
+    assert results == ["Newry story with an absurdly old (unreliable) pubDate"]
+
+
+def test_fetch_entries_applies_keyword_filter(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Test Feed", "url": "http://example.com/rss", "keyword_filter": ["newry"]}],
+    )
+    entries = [
+        SimpleNamespace(title="Newry council meets today", link="http://example.com/1", summary=""),
+        SimpleNamespace(title="Unrelated national story", link="http://example.com/2", summary=""),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = list(bot.fetch_entries())
+
+    assert len(results) == 1
+    assert results[0][0] == "Newry council meets today"
+
+
+def test_fetch_entries_keyword_filter_matches_any_catchment_place(monkeypatch):
+    # A story doesn't need to mention "Newry" itself -- any catchment-area
+    # place name should be enough to pass the filter.
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "BBC News NI", "url": "http://example.com/rss", "keyword_filter": config.CATCHMENT_PLACES}],
+    )
+    entries = [
+        SimpleNamespace(title="New footbridge planned for Rostrevor", link="http://example.com/1", summary=""),
+        SimpleNamespace(title="Crossmaglen GAA club hosts open day", link="http://example.com/2", summary=""),
+        SimpleNamespace(title="Dundalk unveils new bus route", link="http://example.com/3", summary=""),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = [title for title, *_ in bot.fetch_entries()]
+
+    assert "New footbridge planned for Rostrevor" in results
+    assert "Crossmaglen GAA club hosts open day" in results
+    # Dundalk is deliberately not in the catchment list -- a Dundalk-only
+    # story with no other catchment place mentioned should be filtered out.
+    assert "Dundalk unveils new bus route" not in results
+
+
+def test_fetch_entries_filters_relevance_even_for_google_news_feed(monkeypatch):
+    # Regression test for a real incident (2026-09-04): with
+    # keyword_filter=None on the Google News feed, a completely unrelated
+    # crime story from Dundee, Scotland got posted, because nothing
+    # independently checked relevance -- the code just trusted Google's
+    # search results. The Google News feed must filter just like BBC does.
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Google News - Newry area", "url": "http://example.com/rss", "keyword_filter": config.CATCHMENT_PLACES}],
+    )
+    entries = [
+        SimpleNamespace(
+            title="Police investigate rape at Dundee multi - The Courier",
+            link="http://example.com/1",
+            summary="",
+            source=SimpleNamespace(title="The Courier"),
+        ),
+        SimpleNamespace(
+            title="Council approves new play park - Newry Times",
+            link="http://example.com/2",
+            summary="",
+            source=SimpleNamespace(title="Newry Times"),
+        ),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = [title for title, *_ in bot.fetch_entries()]
+
+    assert results == ["Council approves new play park"]
+
+
+def test_fetch_entries_keyword_filter_checks_raw_title_before_stripping(monkeypatch):
+    # A story can be genuinely local with no catchment place in the
+    # headline text itself -- only in the outlet name that gets stripped
+    # off afterwards (e.g. "... - Newry.ie"). Filtering on the
+    # already-stripped title would wrongly drop it.
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Google News - Newry area", "url": "http://example.com/rss", "keyword_filter": config.CATCHMENT_PLACES}],
+    )
+    entry = SimpleNamespace(
+        title="'Team Mullen' to compete in Great North Run in memory of their late mother Anne - Newry.ie",
+        link="http://example.com/1",
+        summary="",
+        source=SimpleNamespace(title="Newry.ie"),
+    )
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed([entry]))
+
+    results = list(bot.fetch_entries())
+
+    assert len(results) == 1
+    assert results[0][0] == "'Team Mullen' to compete in Great North Run in memory of their late mother Anne"
+
+
+def test_fetch_entries_strips_source_title_suffix(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Google News - Newry", "url": "http://example.com/rss", "keyword_filter": None}],
+    )
+    entry = SimpleNamespace(
+        title="New bins scheme starts Monday - Newry Times",
+        link="http://example.com/1",
+        summary="",
+        source=SimpleNamespace(title="Newry Times"),
+    )
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed([entry]))
+
+    (title, link, summary, source_name), = list(bot.fetch_entries())
+
+    assert title == "New bins scheme starts Monday"
+
+
+def test_fetch_entries_falls_back_to_generic_vendor_stripper_without_source(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "BBC News NI", "url": "http://example.com/rss", "keyword_filter": None}],
+    )
+    entry = SimpleNamespace(
+        title="Seamus Mallon event | Newry News",
+        link="http://example.com/1",
+        summary="",
+    )
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed([entry]))
+
+    (title, link, summary, source_name), = list(bot.fetch_entries())
+
+    assert title == "Seamus Mallon event"
+
+
+def test_fetch_entries_skips_entries_missing_title_or_link(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Test Feed", "url": "http://example.com/rss", "keyword_filter": None}],
+    )
+    entries = [
+        SimpleNamespace(title="", link="http://example.com/1", summary=""),
+        SimpleNamespace(title="Has no link", link="", summary=""),
+        SimpleNamespace(title="Valid entry", link="http://example.com/3", summary=""),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = list(bot.fetch_entries())
+
+    assert len(results) == 1
+    assert results[0][0] == "Valid entry"
+
+
+def test_fetch_entries_handles_empty_feed_gracefully(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Test Feed", "url": "http://example.com/rss", "keyword_filter": None}],
+    )
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed([]))
+
+    assert list(bot.fetch_entries()) == []
+
+
+def test_fetch_entries_handles_feed_fetch_exception(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Test Feed", "url": "http://example.com/rss", "keyword_filter": None}],
+    )
+
+    def _raise(url):
+        raise ConnectionError("network is down")
+
+    monkeypatch.setattr(bot.feedparser, "parse", _raise)
+
+    assert list(bot.fetch_entries()) == []  # logged and skipped, not raised

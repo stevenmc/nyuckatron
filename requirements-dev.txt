@@ -1,0 +1,4 @@
+# Additional dependencies for running the test suite. Not needed to run the
+# bot itself -- see requirements.txt for that.
+-r requirements.txt
+pytest==8.4.2
