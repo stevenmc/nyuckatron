@@ -144,9 +144,54 @@ def fetch_entries():
             yield title, link, summary, feed["name"]
 
 
+def fetch_newry_ie_candidates():
+    """(link, normalized_title) pairs for newry.ie's own most recent
+    articles -- a direct, always-resolvable link source used to substitute
+    for a Google News link that headline-matches the same story (see
+    config.NEWRY_IE_LINK_MATCH_THRESHOLD). Parses the Newry.ie feed
+    independently of fetch_entries() so it isn't affected by FEEDS order or
+    that feed's own keyword_filter -- a Newry.ie entry that got filtered out
+    there (e.g. no catchment place mentioned in its own title/summary) can
+    still be exactly what a Google News entry, which passed its own
+    relevance check with different wording, is describing.
+
+    Fails open (logs, returns []) on any error -- this is a nice-to-have
+    substitution, never something that should block a run."""
+    feed = next((f for f in config.FEEDS if f["name"] == "Newry.ie"), None)
+    if feed is None:
+        return []
+
+    try:
+        parsed = feedparser.parse(feed["url"])
+    except Exception:
+        log.exception("Failed to fetch Newry.ie feed for Google News link substitution")
+        return []
+
+    max_entries = feed.get("max_entries")
+    entries = parsed.entries[:max_entries] if max_entries else parsed.entries
+
+    candidates = []
+    for entry in entries:
+        title = getattr(entry, "title", "").strip()
+        link = getattr(entry, "link", "").strip()
+        if not title or not link:
+            continue
+        candidates.append((link, textutil.normalize(linkclean.strip_vendor_suffix(title))))
+    return candidates
+
+
 def is_excluded(title, summary):
     haystack = (title + " " + summary).lower()
     return any(kw in haystack for kw in config.EXCLUDE_KEYWORDS)
+
+
+def find_newry_ie_substitute(normalized_title, newry_ie_candidates):
+    """(link, score) of the Newry.ie candidate whose headline is a close
+    enough match for normalized_title to stand in for an unresolved Google
+    News link, or None. See config.NEWRY_IE_LINK_MATCH_THRESHOLD."""
+    return textutil.best_duplicate_match(
+        normalized_title, newry_ie_candidates, config.NEWRY_IE_LINK_MATCH_THRESHOLD
+    )
 
 
 def main():
@@ -165,6 +210,9 @@ def main():
     live_submission_titles = [(sub, textutil.normalize(sub.title)) for sub in live_submissions]
     spam_urls = moderation.fetch_spam_urls(reddit, config.SUBREDDIT)
     feed_by_name = {feed["name"]: feed for feed in config.FEEDS}
+    # Stopgap for Tier 3 (browser resolve) being unavailable on the current
+    # EC2 box -- see config.NEWRY_IE_LINK_MATCH_THRESHOLD.
+    newry_ie_candidates = fetch_newry_ie_candidates()
 
     posts_made = 0
     seen_urls_this_run = set()
@@ -216,6 +264,25 @@ def main():
                 continue
 
             resolved_url = linkclean.clean_url(link)
+
+            # Still a Google News wrapper link (Tiers 1/2 didn't resolve
+            # it): a lot of what this feed surfaces already ran on Newry.ie
+            # too, under its own real, always-working link -- if a recent
+            # Newry.ie article's headline is a close match, use that link
+            # instead of the wrapper (stricter threshold than the general
+            # fuzzy-dedup one: a wrong substitution is worse than a missed
+            # one). See config.NEWRY_IE_LINK_MATCH_THRESHOLD.
+            if "news.google.com" in resolved_url and newry_ie_candidates:
+                substitute = find_newry_ie_substitute(normalized, newry_ie_candidates)
+                if substitute:
+                    newry_ie_link, score = substitute
+                    log.info(
+                        "Substituting Newry.ie link for unresolved Google News article "
+                        "(headline %.2f similar) [%s] %s -> %s",
+                        score, source_name, title, newry_ie_link,
+                    )
+                    resolved_url = newry_ie_link
+
             if "news.google.com" in resolved_url:
                 log.warning("Could not resolve Google News link to a real URL (Tiers 1/2), posting wrapper link unless Tier 3 rescues it: %s", link)
 

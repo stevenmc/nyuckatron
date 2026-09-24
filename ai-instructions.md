@@ -491,3 +491,35 @@ a `None` start separately anyway), and compares against Europe/London
 wall-clock time specifically (`zoneinfo`), not the host machine's own
 local time — important because the actual deployment target is an EC2
 box that won't necessarily be in that timezone.
+
+## Newry.ie link substitution for unresolved Google News links (`bot.py`, `config.py`)
+
+**Added 2026-09-24 as an explicit stopgap** — Tier 3 (a real headless
+browser, `linkclean.GoogleNewsBrowserResolver`) is the most reliable way
+to resolve a Google News wrapper link, but it can't run on the current
+EC2 box (GLIBC 2.28 required, Bionic has 2.27; see the resolver's own
+docstring), so Tiers 1/2 alone leave most Google News entries unresolved.
+Since a large share of what the Google News search surfaces already ran
+on Newry.ie too, `bot.fetch_newry_ie_candidates` independently fetches
+Newry.ie's feed (same `max_entries`-limited window as the main pipeline,
+but *not* filtered by that feed's own `keyword_filter` — a Newry.ie entry
+that got filtered out there can still be exactly what a differently-worded
+Google News entry is describing) and `bot.find_newry_ie_substitute`
+fuzzy-matches the candidate title against it. On a match, the Newry.ie
+link — real, always-resolvable — is substituted for the wrapper link
+*before* any of the downstream domain-exclusion/known-outlet/dedup checks
+run, so it benefits from all of them same as any other link (and, usefully,
+if Newry.ie's own feed entry for the same story was already posted earlier
+in the same run or a previous one, the exact-URL dedup check now catches
+the Google News entry as a repost too, which it couldn't before when the
+two entries carried different-looking URLs).
+
+**Deliberately a stricter threshold than the general fuzzy-dedup one**
+(`config.NEWRY_IE_LINK_MATCH_THRESHOLD = 0.75` vs.
+`SIMILARITY_THRESHOLD = 0.5`) — dedup only decides whether to *skip or
+comment on* a post, so a false positive there is low-cost; this decides
+*which URL to actually post*, so a false positive here would silently
+send readers to the wrong article under the original (correct) headline.
+Remove this whole mechanism once the EC2 box is upgraded and Tier 3 is
+reliable again — it's a workaround for a specific, temporary infrastructure
+gap, not a permanent design choice.

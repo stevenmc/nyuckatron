@@ -26,12 +26,15 @@ by cron -- no server, nothing kept running between runs.
 - Resolves Google News' wrapper links to the real article URL where
   possible -- offline decode first (free, works for older-format links),
   then a live resolve through Google's internal API as a fallback (works
-  intermittently -- see "Design notes" below for measured hit rate).
-  Falls back to posting the wrapper link itself if both fail; readers
-  still get a working link either way. Also rewrites a `m.`-prefixed
-  mobile subdomain (e.g. `m.belfasttelegraph.co.uk`) down to its
-  canonical host, whether that shows up directly in a feed or only after
-  Google News decoding.
+  intermittently -- see "Design notes" below for measured hit rate). If
+  both fail and a recent Newry.ie article's headline is a close match
+  (`config.NEWRY_IE_LINK_MATCH_THRESHOLD`), substitutes Newry.ie's real
+  link instead of the wrapper -- a lot of what the Google News search
+  surfaces already ran on Newry.ie too. Otherwise falls back to posting
+  the wrapper link itself; readers still get a working link either way.
+  Also rewrites a `m.`-prefixed mobile subdomain (e.g.
+  `m.belfasttelegraph.co.uk`) down to its canonical host, whether that
+  shows up directly in a feed or only after Google News decoding.
 - `KNOWN_LOCAL_OUTLETS` (plus `KNOWN_LOCAL_OUTLET_SUFFIXES` for shared
   naming patterns like NI government departments, and a substring match
   against `CATCHMENT_PLACES` for outlets whose own domain name signals

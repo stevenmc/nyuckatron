@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import bot
 import config
 import linkclean
+import textutil
 
 
 def test_is_excluded_matches_death_notice():
@@ -336,6 +337,102 @@ def test_fetch_entries_handles_empty_feed_gracefully(monkeypatch):
     monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed([]))
 
     assert list(bot.fetch_entries()) == []
+
+
+# --- Newry.ie link substitution for unresolved Google News links --------
+#
+# Stopgap while Tier 3 (the headless-browser resolver) can't run on the
+# current EC2 box -- see config.NEWRY_IE_LINK_MATCH_THRESHOLD.
+
+def test_fetch_newry_ie_candidates_returns_link_and_normalized_title(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Newry.ie", "url": "http://example.com/newry-ie-rss", "max_entries": 3}],
+    )
+    entries = [
+        SimpleNamespace(title="Council approves new play park - Newry.ie", link="https://newry.ie/1"),
+        SimpleNamespace(title="Second story", link="https://newry.ie/2"),
+        SimpleNamespace(title="Third story", link="https://newry.ie/3"),
+        SimpleNamespace(title="Fourth story (past max_entries)", link="https://newry.ie/4"),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    candidates = bot.fetch_newry_ie_candidates()
+
+    assert candidates == [
+        ("https://newry.ie/1", bot.textutil.normalize("Council approves new play park")),
+        ("https://newry.ie/2", bot.textutil.normalize("Second story")),
+        ("https://newry.ie/3", bot.textutil.normalize("Third story")),
+    ]  # respects max_entries, and strips the vendor suffix like fetch_entries does
+
+
+def test_fetch_newry_ie_candidates_returns_empty_when_feed_not_configured(monkeypatch):
+    monkeypatch.setattr(config, "FEEDS", [{"name": "BBC News NI", "url": "http://example.com/rss"}])
+    assert bot.fetch_newry_ie_candidates() == []
+
+
+def test_fetch_newry_ie_candidates_fails_open_on_fetch_exception(monkeypatch):
+    monkeypatch.setattr(config, "FEEDS", [{"name": "Newry.ie", "url": "http://example.com/newry-ie-rss"}])
+
+    def _raise(url):
+        raise ConnectionError("network is down")
+
+    monkeypatch.setattr(bot.feedparser, "parse", _raise)
+
+    assert bot.fetch_newry_ie_candidates() == []  # doesn't raise
+
+
+def test_fetch_newry_ie_candidates_skips_entries_missing_title_or_link(monkeypatch):
+    monkeypatch.setattr(config, "FEEDS", [{"name": "Newry.ie", "url": "http://example.com/newry-ie-rss"}])
+    entries = [
+        SimpleNamespace(title="", link="https://newry.ie/1"),
+        SimpleNamespace(title="Has no link", link=""),
+        SimpleNamespace(title="Valid entry", link="https://newry.ie/3"),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    candidates = bot.fetch_newry_ie_candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0][0] == "https://newry.ie/3"
+
+
+def test_find_newry_ie_substitute_matches_a_close_headline():
+    candidates = [
+        ("https://newry.ie/1", bot.textutil.normalize("Newry's new £18.6m park is approved")),
+        ("https://newry.ie/2", bot.textutil.normalize("Unrelated story about roadworks")),
+    ]
+    target = bot.textutil.normalize(
+        "'Wonderful day' for Newry as £18.6m Albert Basin city park plans approved"
+    )
+
+    match = bot.find_newry_ie_substitute(target, candidates)
+
+    assert match is not None
+    assert match[0] == "https://newry.ie/1"
+
+
+def test_find_newry_ie_substitute_is_stricter_than_the_general_dedup_threshold():
+    # Two headlines similar enough to count as duplicates under
+    # SIMILARITY_THRESHOLD, but not similar enough to trust for a URL
+    # substitution -- config.NEWRY_IE_LINK_MATCH_THRESHOLD is deliberately
+    # tighter, since a wrong substitution silently sends readers to the
+    # wrong article under the original headline.
+    a = textutil.normalize("SDLP credit Newry Community for making City Park vision a reality")
+    b = textutil.normalize("SDLP Says Newry Community Made Newry Park A Reality")
+    sim = textutil.similarity(a, b)
+    assert config.SIMILARITY_THRESHOLD <= sim < config.NEWRY_IE_LINK_MATCH_THRESHOLD  # sanity-check the fixture
+
+    assert textutil.is_duplicate_story(a, [b], config.SIMILARITY_THRESHOLD)
+    assert bot.find_newry_ie_substitute(a, [("https://newry.ie/1", b)]) is None
+
+
+def test_find_newry_ie_substitute_returns_none_when_nothing_matches():
+    candidates = [("https://newry.ie/1", bot.textutil.normalize("Completely unrelated story"))]
+    target = bot.textutil.normalize("Council approves new play park in Warrenpoint")
+
+    assert bot.find_newry_ie_substitute(target, candidates) is None
 
 
 def test_fetch_entries_handles_feed_fetch_exception(monkeypatch):

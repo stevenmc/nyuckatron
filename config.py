@@ -320,6 +320,22 @@ EXCLUDE_DOMAINS = [
 SIMILARITY_THRESHOLD = 0.5
 DEDUP_WINDOW_DAYS = 14
 
+# Stricter than SIMILARITY_THRESHOLD, deliberately: used by bot.py to decide
+# whether an unresolved Google News link and a recent Newry.ie article are
+# the *same* story, close enough to substitute Newry.ie's real, working
+# link for the Google News wrapper link before posting -- not just to merge
+# two posts about a similar topic. A false positive here silently sends
+# readers to the wrong article under the original headline, which is worse
+# than the false positives SIMILARITY_THRESHOLD tolerates elsewhere, so this
+# needs a tighter bar. Added 2026-09-24 as a stopgap: most Google News links
+# currently fail to resolve at all (Tier 3, the headless-browser resolver,
+# can't run on the current EC2 box -- see linkclean.GoogleNewsBrowserResolver's
+# docstring), and a large share of what's posted from Google News turns out
+# to already be on Newry.ie, which is a direct, always-resolvable link. This
+# whole mechanism can be removed once the EC2 box is upgraded and Tier 3 is
+# reliable again.
+NEWRY_IE_LINK_MATCH_THRESHOLD = 0.75
+
 # An entry older than this (by its feed-declared published/updated date) is
 # never posted, regardless of how it scores on every other check. Added
 # 2026-09-05 after noticing newry.ie's own feed carries at least one entry
