@@ -7,13 +7,15 @@ by cron -- no server, nothing kept running between runs.
 ## What it does
 
 - Pulls entries from the feeds in [config.py](config.py): BBC News NI,
-  newry.ie's own feed, Newry Democrat's own feed, and a Google News RSS
-  search -- see `CATCHMENT_PLACES` in config.py: Newry, Mayobridge,
+  newry.ie's own editorial output, Newry Democrat's own feed, and a Google
+  News RSS search -- see `CATCHMENT_PLACES` in config.py: Newry, Mayobridge,
   Hilltown, Camlough, Rostrevor, Warrenpoint, Carlingford, Crossmaglen,
   Lislea, Omeath. Dundalk is deliberately excluded -- it's a substantial
   town in a different jurisdiction with its own separate news cycle, and
   including it pulled in a lot of Dundalk-only stories with no real
-  connection to Newry.
+  connection to Newry. Newry.ie is scraped from its homepage HTML
+  (`bot.py`'s `_scrape_newry_ie_homepage`), not its RSS feed -- that feed
+  silently stopped updating in practice; see "Design notes" below.
 - Drops anything older than `MAX_NEWS_AGE_DAYS` (by the feed's own
   published/updated date). Newry.ie and Newry Democrat are exempt from
   this specific check -- their own date fields are unreliable (confirmed:
@@ -23,16 +25,19 @@ by cron -- no server, nothing kept running between runs.
   considered, sidestepping the bad date field entirely. See `bot.py`'s
   `fetch_entries` and `_is_too_old` for how the two checks stay mutually
   exclusive per feed.
-- Resolves Google News' wrapper links to the real article URL where
-  possible -- offline decode first (free, works for older-format links),
-  then a live resolve through Google's internal API as a fallback (works
-  intermittently -- see "Design notes" below for measured hit rate). If
-  both fail and a recent Newry.ie article's headline is a close match
-  (`config.NEWRY_IE_LINK_MATCH_THRESHOLD`), substitutes Newry.ie's real
-  link instead of the wrapper -- a lot of what the Google News search
-  surfaces already ran on Newry.ie too. Otherwise falls back to posting
-  the wrapper link itself; readers still get a working link either way.
-  Also rewrites a `m.`-prefixed mobile subdomain (e.g.
+- For a Google News entry, checks first whether a recent Newry.ie
+  article's headline is a close match (`config.NEWRY_IE_LINK_MATCH_
+  THRESHOLD` -- stricter than the general dedup threshold, since a wrong
+  substitution is worse than a missed one) and, if so, uses Newry.ie's own
+  real link straightaway -- a lot of what the Google News search surfaces
+  already ran on Newry.ie too, and there's no point resolving Google's
+  wrapper link once we already know that. Otherwise, resolves the wrapper
+  link to the real article URL where possible -- offline decode first
+  (free, works for older-format links), then a live resolve through
+  Google's internal API as a fallback (works intermittently -- see
+  "Design notes" below for measured hit rate). Falls back to posting the
+  wrapper link itself if both fail; readers still get a working link
+  either way. Also rewrites a `m.`-prefixed mobile subdomain (e.g.
   `m.belfasttelegraph.co.uk`) down to its canonical host, whether that
   shows up directly in a feed or only after Google News decoding.
 - `KNOWN_LOCAL_OUTLETS` (plus `KNOWN_LOCAL_OUTLET_SUFFIXES` for shared

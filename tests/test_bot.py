@@ -344,19 +344,96 @@ def test_fetch_entries_handles_empty_feed_gracefully(monkeypatch):
 # Stopgap while Tier 3 (the headless-browser resolver) can't run on the
 # current EC2 box -- see config.NEWRY_IE_LINK_MATCH_THRESHOLD.
 
-def test_fetch_newry_ie_candidates_returns_link_and_normalized_title(monkeypatch):
-    monkeypatch.setattr(
-        config,
-        "FEEDS",
-        [{"name": "Newry.ie", "url": "http://example.com/newry-ie-rss", "max_entries": 3}],
+# --- parsing newry.ie's homepage HTML (replaces its stale RSS feed, see
+# config.py's Newry.ie FEEDS entry for the full incident) -----------------
+
+def _raxo_article_html(slug, title, heading="h4"):
+    return f'<{heading} class="raxo-title"><a href="/articles/news/{slug}">{title}</a></{heading}>'
+
+
+def test_parse_newry_ie_homepage_articles_extracts_title_and_link_in_order():
+    html_text = (
+        _raxo_article_html("first-story", "First Story", heading="h3")
+        + _raxo_article_html("second-story", "Second Story")
+        + _raxo_article_html("third-story", "Third Story")
     )
+
+    articles = bot._parse_newry_ie_homepage_articles(html_text)
+
+    assert articles == [
+        ("First Story", "https://www.newry.ie/articles/news/first-story"),
+        ("Second Story", "https://www.newry.ie/articles/news/second-story"),
+        ("Third Story", "https://www.newry.ie/articles/news/third-story"),
+    ]  # h3 (featured/hero) and h4 (normal list item) both recognised
+
+
+def test_parse_newry_ie_homepage_articles_dedupes_by_link_keeping_first_occurrence():
+    # Real newry.ie pages repeat the same headline in a per-category
+    # sidebar widget further down the page -- only the first (top of page,
+    # most-recent-first) occurrence should survive.
+    html_text = (
+        _raxo_article_html("story-a", "Story A")
+        + _raxo_article_html("story-b", "Story B")
+        + _raxo_article_html("story-a", "Story A")  # repeated in a sidebar widget
+    )
+
+    articles = bot._parse_newry_ie_homepage_articles(html_text)
+
+    assert articles == [
+        ("Story A", "https://www.newry.ie/articles/news/story-a"),
+        ("Story B", "https://www.newry.ie/articles/news/story-b"),
+    ]
+
+
+def test_parse_newry_ie_homepage_articles_unescapes_html_entities_in_titles():
+    html_text = _raxo_article_html("cf-research", "&#163;20,000 raised for CF research &amp; more")
+
+    articles = bot._parse_newry_ie_homepage_articles(html_text)
+
+    assert articles == [("£20,000 raised for CF research & more", "https://www.newry.ie/articles/news/cf-research")]
+
+
+def test_parse_newry_ie_homepage_articles_returns_empty_for_unrecognised_markup():
+    assert bot._parse_newry_ie_homepage_articles("<html><body>no articles here</body></html>") == []
+
+
+def test_scrape_newry_ie_homepage_returns_entries_from_a_successful_fetch(monkeypatch):
+    html_text = _raxo_article_html("a-story", "A Story")
+    monkeypatch.setattr(
+        bot.requests, "get", lambda url, timeout: SimpleNamespace(
+            text=html_text, raise_for_status=lambda: None
+        )
+    )
+
+    parsed = bot._scrape_newry_ie_homepage()
+
+    assert len(parsed.entries) == 1
+    assert parsed.entries[0].title == "A Story"
+    assert parsed.entries[0].link == "https://www.newry.ie/articles/news/a-story"
+
+
+def test_scrape_newry_ie_homepage_fails_open_on_request_exception(monkeypatch):
+    def _raise(url, timeout):
+        raise bot.requests.RequestException("network is down")
+
+    monkeypatch.setattr(bot.requests, "get", _raise)
+
+    parsed = bot._scrape_newry_ie_homepage()
+
+    assert parsed.entries == []  # doesn't raise
+
+
+# --- fetch_newry_ie_candidates (uses the scrape above, not feedparser) --
+
+def test_fetch_newry_ie_candidates_returns_link_and_normalized_title(monkeypatch):
+    monkeypatch.setattr(config, "FEEDS", [{"name": "Newry.ie", "scrape_homepage": True, "max_entries": 3}])
     entries = [
         SimpleNamespace(title="Council approves new play park - Newry.ie", link="https://newry.ie/1"),
         SimpleNamespace(title="Second story", link="https://newry.ie/2"),
         SimpleNamespace(title="Third story", link="https://newry.ie/3"),
         SimpleNamespace(title="Fourth story (past max_entries)", link="https://newry.ie/4"),
     ]
-    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+    monkeypatch.setattr(bot, "_scrape_newry_ie_homepage", lambda: SimpleNamespace(entries=entries))
 
     candidates = bot.fetch_newry_ie_candidates()
 
@@ -372,25 +449,21 @@ def test_fetch_newry_ie_candidates_returns_empty_when_feed_not_configured(monkey
     assert bot.fetch_newry_ie_candidates() == []
 
 
-def test_fetch_newry_ie_candidates_fails_open_on_fetch_exception(monkeypatch):
-    monkeypatch.setattr(config, "FEEDS", [{"name": "Newry.ie", "url": "http://example.com/newry-ie-rss"}])
-
-    def _raise(url):
-        raise ConnectionError("network is down")
-
-    monkeypatch.setattr(bot.feedparser, "parse", _raise)
+def test_fetch_newry_ie_candidates_reflects_scrape_failing_open(monkeypatch):
+    monkeypatch.setattr(config, "FEEDS", [{"name": "Newry.ie", "scrape_homepage": True}])
+    monkeypatch.setattr(bot, "_scrape_newry_ie_homepage", lambda: SimpleNamespace(entries=[]))
 
     assert bot.fetch_newry_ie_candidates() == []  # doesn't raise
 
 
 def test_fetch_newry_ie_candidates_skips_entries_missing_title_or_link(monkeypatch):
-    monkeypatch.setattr(config, "FEEDS", [{"name": "Newry.ie", "url": "http://example.com/newry-ie-rss"}])
+    monkeypatch.setattr(config, "FEEDS", [{"name": "Newry.ie", "scrape_homepage": True}])
     entries = [
         SimpleNamespace(title="", link="https://newry.ie/1"),
         SimpleNamespace(title="Has no link", link=""),
         SimpleNamespace(title="Valid entry", link="https://newry.ie/3"),
     ]
-    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+    monkeypatch.setattr(bot, "_scrape_newry_ie_homepage", lambda: SimpleNamespace(entries=entries))
 
     candidates = bot.fetch_newry_ie_candidates()
 
@@ -448,3 +521,24 @@ def test_fetch_entries_handles_feed_fetch_exception(monkeypatch):
     monkeypatch.setattr(bot.feedparser, "parse", _raise)
 
     assert list(bot.fetch_entries()) == []  # logged and skipped, not raised
+
+
+def test_fetch_entries_routes_a_scrape_homepage_feed_through_the_scraper_not_feedparser(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Newry.ie", "scrape_homepage": True, "keyword_filter": ["newry"]}],
+    )
+    monkeypatch.setattr(
+        bot, "_scrape_newry_ie_homepage",
+        lambda: SimpleNamespace(entries=[SimpleNamespace(title="Newry story", link="https://newry.ie/1")]),
+    )
+
+    def _fail_if_called(url):
+        raise AssertionError("scrape_homepage feeds must not go through feedparser.parse")
+
+    monkeypatch.setattr(bot.feedparser, "parse", _fail_if_called)
+
+    results = list(bot.fetch_entries())
+
+    assert results == [("Newry story", "https://newry.ie/1", "", "Newry.ie")]

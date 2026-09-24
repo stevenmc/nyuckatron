@@ -208,26 +208,34 @@ FEEDS = [
         "restrict_to_known_local_outlets": False,
     },
     {
-        # Verified working 2026-09-05: earlier testing found newry.ie's
-        # regular pages blocked (403/empty body) for plain HTTP requests,
-        # but this Joomla-generated feed endpoint isn't behind the same
-        # block and works cleanly with feedparser's default request, no
-        # special headers needed. Doesn't need restrict_to_known_local_
-        # outlets: it's newry.ie's own editorial feed, not an aggregator
-        # search, so the ambiguous-placename problem (see Hilltown/Dundee
-        # in KNOWN_LOCAL_OUTLETS's history) doesn't apply here either.
+        # scrape_homepage=True, replacing this feed's RSS URL entirely as
+        # of 2026-09-24: newry.ie's own feed (https://www.newry.ie/
+        # ?format=feed&type=rss, verified working 2026-09-05) turned out to
+        # have silently stopped updating around that same date -- confirmed
+        # live nearly three weeks later still returning the identical 6
+        # stale entries (dated 2022 through mid-2026, not even in
+        # chronological order) while the actual website kept publishing new
+        # articles daily. Discovered when a reader reported a same-day
+        # newry.ie article (the Evora Hospice "postcode lottery" story)
+        # that bot.find_newry_ie_substitute had no way to see, because it
+        # was never in the feed's candidate list -- see ai-instructions.md
+        # for the full incident. bot.py's _scrape_newry_ie_homepage now
+        # parses newry.ie's homepage HTML directly instead (confirmed
+        # genuinely newest-first, matching the dates newry.ie displays next
+        # to each story) -- no special headers needed, a plain `requests`
+        # GET with its default user agent gets a normal 200. Doesn't need
+        # restrict_to_known_local_outlets: it's newry.ie's own editorial
+        # output, not an aggregator search, so the ambiguous-placename
+        # problem (see Hilltown/Dundee in KNOWN_LOCAL_OUTLETS's history)
+        # doesn't apply here either.
         #
-        # max_entries=3, added 2026-09-06: this feed's own pubDate is
-        # unreliable -- confirmed live, entries scatter across 2022-2025
-        # with no relation to actual recency -- so MAX_NEWS_AGE_DAYS's
-        # date check would drop 100% of it (confirmed: 0/6 survived).
-        # bot.py's fetch_entries treats max_entries and the date check as
-        # mutually exclusive per feed: this takes only the first N entries
-        # in feed order (assumed newest-first, the standard RSS convention,
-        # independent of whether the pubDate *value* is trustworthy)
-        # instead of by date.
+        # max_entries=3 still applies on top of the scrape, unchanged from
+        # when it was added 2026-09-06 to work around the old feed's
+        # unreliable pubDate: keeps both this feed's own direct-posting
+        # pipeline and the Google News substitution candidate list scoped
+        # to only the newest few articles, same as before.
         "name": "Newry.ie",
-        "url": "https://www.newry.ie/?format=feed&type=rss",
+        "scrape_homepage": True,
         "keyword_filter": CATCHMENT_PLACES,
         "restrict_to_known_local_outlets": False,
         "max_entries": 3,

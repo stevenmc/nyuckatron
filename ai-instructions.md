@@ -500,19 +500,23 @@ to resolve a Google News wrapper link, but it can't run on the current
 EC2 box (GLIBC 2.28 required, Bionic has 2.27; see the resolver's own
 docstring), so Tiers 1/2 alone leave most Google News entries unresolved.
 Since a large share of what the Google News search surfaces already ran
-on Newry.ie too, `bot.fetch_newry_ie_candidates` independently fetches
-Newry.ie's feed (same `max_entries`-limited window as the main pipeline,
-but *not* filtered by that feed's own `keyword_filter` — a Newry.ie entry
-that got filtered out there can still be exactly what a differently-worded
-Google News entry is describing) and `bot.find_newry_ie_substitute`
-fuzzy-matches the candidate title against it. On a match, the Newry.ie
-link — real, always-resolvable — is substituted for the wrapper link
-*before* any of the downstream domain-exclusion/known-outlet/dedup checks
-run, so it benefits from all of them same as any other link (and, usefully,
-if Newry.ie's own feed entry for the same story was already posted earlier
-in the same run or a previous one, the exact-URL dedup check now catches
-the Google News entry as a repost too, which it couldn't before when the
-two entries carried different-looking URLs).
+on Newry.ie too, `bot.fetch_newry_ie_candidates` independently scrapes
+Newry.ie's homepage (same `max_entries`-limited window as the main
+pipeline, but *not* filtered by that feed's own `keyword_filter` — a
+Newry.ie entry that got filtered out there can still be exactly what a
+differently-worded Google News entry is describing) and
+`bot.find_newry_ie_substitute` fuzzy-matches the candidate title against
+it. On a match, `main()` uses the Newry.ie link straightaway — checked
+*before* even attempting to resolve the Google News wrapper link at all
+(not just as a fallback after Tiers 1/2 fail, the original 2026-09-24
+design — reordered the same day after a real miss, see the incident
+below), and *before* any of the downstream domain-exclusion/known-
+outlet/dedup checks run, so it benefits from all of them same as any
+other link (and, usefully, if Newry.ie's own entry for the same story
+was already posted earlier in the same run or a previous one, the
+exact-URL dedup check now catches the Google News entry as a repost too,
+which it couldn't before when the two entries carried different-looking
+URLs).
 
 **Deliberately a stricter threshold than the general fuzzy-dedup one**
 (`config.NEWRY_IE_LINK_MATCH_THRESHOLD = 0.75` vs.
@@ -523,3 +527,45 @@ send readers to the wrong article under the original (correct) headline.
 Remove this whole mechanism once the EC2 box is upgraded and Tier 3 is
 reliable again — it's a workaround for a specific, temporary infrastructure
 gap, not a permanent design choice.
+
+**Incident, same day: Newry.ie's own RSS feed had silently stopped
+updating, and `fetch_newry_ie_candidates` was reading it.** A reader
+reported that a specific same-day Newry.ie story ("Evora hospice joins
+call to end palliative care 'postcode lottery'") should have matched and
+didn't. Investigation found newry.ie's RSS feed
+(`https://www.newry.ie/?format=feed&type=rss`, the same URL verified
+working on 2026-09-05 — see the FEEDS entry's original comment, since
+replaced) had returned the identical 6 entries, dated 2022 through mid-
+2026 and not even in chronological order, for every run since roughly
+that date — nearly three weeks — while the live site kept publishing new
+articles daily, confirmed by browsing the homepage directly and finding
+both that day's top story and the reported Evora Hospice article in its
+HTML, neither anywhere in the RSS output. The candidate-matching logic
+itself was never the problem; it was working correctly against a feed
+that had gone stale without erroring, returning the same well-formed but
+frozen response every time — nothing in `fetch_newry_ie_candidates` (or
+feedparser) would raise or warn about that, since a feed returning old
+entries indefinitely looks identical, from this code's point of view, to
+a feed that's still updating but just doesn't have new stories yet. **The
+same broken feed was also the Newry.ie entry's `url` in `config.FEEDS`
+itself** — meaning the bot's *direct* Newry.ie-sourced Reddit posts (the
+`fetch_entries()` pipeline, independent of the substitution feature) had
+also been silently stalled since 2026-09-05, confirmed via `bot.log`
+showing no `Posted [Newry.ie]` line in that entire window despite the
+site publishing normally. The fix: `bot._scrape_newry_ie_homepage`
+replaces the feed URL for both use sites with a direct HTML scrape of
+`https://www.newry.ie/` (parsed by `bot._parse_newry_ie_homepage_articles`,
+matching `<h3 class="raxo-title">`/`<h4 class="raxo-title">` article
+links — Joomla's "Raxo" template, confirmed against the real page,
+featured/hero items using `<h3>` and normal list items `<h4>`), which is
+confirmed newest-first by the dates newry.ie displays next to each story
+— unlike the old feed's `pubDate`, which config.py's FEEDS comment had
+already documented as unreliable back on 2026-09-06, just not to the
+point of being frozen entirely. **Lesson for future feed integrations on
+this project: a feed that stops updating doesn't necessarily error or
+even look different in shape — it can keep returning a perfectly
+well-formed response forever. Don't assume "still parses, still has
+entries" means "still current"; if a feed's own freshness matters (as
+opposed to `max_entries`-style position-trust, which this incident shows
+isn't a complete substitute either), periodically sanity-check its
+newest entry's date against reality, not just its structure.**

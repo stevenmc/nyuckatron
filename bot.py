@@ -13,13 +13,18 @@ if sys.version_info < _MIN_PYTHON:
     )
 
 import calendar as _calendar  # noqa: E402 -- stdlib, for timegm; distinct from calendar_sync below
+import html  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
+import re  # noqa: E402
 import time  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+from urllib.parse import urljoin  # noqa: E402
 
 import feedparser  # noqa: E402
 import praw  # noqa: E402
+import requests  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
 
 # .env must be loaded before config is imported: config reads REDDIT_SUBREDDIT
@@ -88,7 +93,13 @@ def fetch_entries():
     known vendor suffixes stripped from the title."""
     for feed in config.FEEDS:
         try:
-            parsed = feedparser.parse(feed["url"])
+            # Newry.ie's own RSS feed is scraping's exception, not its rule
+            # (see _scrape_newry_ie_homepage's docstring for why) -- every
+            # other feed goes through feedparser as normal.
+            if feed.get("scrape_homepage"):
+                parsed = _scrape_newry_ie_homepage()
+            else:
+                parsed = feedparser.parse(feed["url"])
         except Exception:
             log.exception("Failed to fetch feed %s", feed["name"])
             continue
@@ -144,11 +155,72 @@ def fetch_entries():
             yield title, link, summary, feed["name"]
 
 
+# Matches newry.ie's own article-headline links, e.g.:
+#   <h3 class="raxo-title"><a href="/articles/news/some-slug">Some Title</a></h3>
+# for a featured/hero item, or the same with <h4> for a normal list item --
+# both variants seen live, confirmed 2026-09-24. Title text is taken as-is
+# (may still contain HTML entities like &amp; or &hellip; -- unescaped by
+# the caller) since a headline itself is never expected to contain nested
+# markup.
+_NEWRY_IE_ARTICLE_LINK = re.compile(r'<h[34] class="raxo-title"><a href="([^"]+)">(.*?)</a></h[34]>')
+
+
+def _parse_newry_ie_homepage_articles(html_text):
+    """(title, link) pairs for every article linked from newry.ie's
+    homepage HTML, in the page's own order (confirmed newest-first, same as
+    the dates newry.ie displays next to each one), deduplicated by link --
+    the homepage repeats the same headline in more than one section (the
+    main river of stories, then again in per-category sidebar widgets
+    further down the page), and only the first, top-of-page occurrence
+    should count. A pure function, deliberately, so it's testable without
+    a real HTTP fetch."""
+    seen_links = set()
+    articles = []
+    for href, raw_title in _NEWRY_IE_ARTICLE_LINK.findall(html_text):
+        link = urljoin("https://www.newry.ie/", href)
+        if link in seen_links:
+            continue
+        seen_links.add(link)
+        title = html.unescape(raw_title).strip()
+        if title:
+            articles.append((title, link))
+    return articles
+
+
+def _scrape_newry_ie_homepage():
+    """A feedparser-shaped object (an .entries list of title/link pairs) --
+    scraped from newry.ie's own homepage HTML, standing in for that feed's
+    RSS URL (https://www.newry.ie/?format=feed&type=rss), which was
+    confirmed 2026-09-24 to have stopped updating around 2026-09-05: it
+    returned the same 6 stale entries (dated 2022-2026, out of publish
+    order) for nearly three weeks running, while the live site kept
+    publishing new articles daily -- including one (the Evora Hospice
+    "postcode lottery" story) that a reader confirmed seeing on newry.ie
+    the same day it went unmatched by bot.find_newry_ie_substitute, because
+    it was never in the feed's candidate list to begin with. See
+    ai-instructions.md for the full incident.
+
+    Fails open (logs, returns an empty .entries list) on any fetch error --
+    same contract as feedparser.parse itself, which never raises on a
+    network failure either; fetch_entries()'s per-feed try/except still
+    wraps this call as a second line of defence."""
+    try:
+        response = requests.get("https://www.newry.ie/", timeout=10)
+        response.raise_for_status()
+    except requests.RequestException:
+        log.warning("Could not fetch newry.ie's homepage")
+        return SimpleNamespace(entries=[], bozo_exception="fetch failed")
+
+    articles = _parse_newry_ie_homepage_articles(response.text)
+    entries = [SimpleNamespace(title=title, link=link) for title, link in articles]
+    return SimpleNamespace(entries=entries, bozo_exception=None)
+
+
 def fetch_newry_ie_candidates():
     """(link, normalized_title) pairs for newry.ie's own most recent
     articles -- a direct, always-resolvable link source used to substitute
     for a Google News link that headline-matches the same story (see
-    config.NEWRY_IE_LINK_MATCH_THRESHOLD). Parses the Newry.ie feed
+    config.NEWRY_IE_LINK_MATCH_THRESHOLD). Scrapes newry.ie's homepage
     independently of fetch_entries() so it isn't affected by FEEDS order or
     that feed's own keyword_filter -- a Newry.ie entry that got filtered out
     there (e.g. no catchment place mentioned in its own title/summary) can
@@ -161,19 +233,14 @@ def fetch_newry_ie_candidates():
     if feed is None:
         return []
 
-    try:
-        parsed = feedparser.parse(feed["url"])
-    except Exception:
-        log.exception("Failed to fetch Newry.ie feed for Google News link substitution")
-        return []
-
+    parsed = _scrape_newry_ie_homepage()
     max_entries = feed.get("max_entries")
     entries = parsed.entries[:max_entries] if max_entries else parsed.entries
 
     candidates = []
     for entry in entries:
-        title = getattr(entry, "title", "").strip()
-        link = getattr(entry, "link", "").strip()
+        title = entry.title.strip()
+        link = entry.link.strip()
         if not title or not link:
             continue
         candidates.append((link, textutil.normalize(linkclean.strip_vendor_suffix(title))))
@@ -263,28 +330,31 @@ def main():
                 log.info("Skipping (duplicate story) [%s] %s", source_name, title)
                 continue
 
-            resolved_url = linkclean.clean_url(link)
-
-            # Still a Google News wrapper link (Tiers 1/2 didn't resolve
-            # it): a lot of what this feed surfaces already ran on Newry.ie
-            # too, under its own real, always-working link -- if a recent
-            # Newry.ie article's headline is a close match, use that link
-            # instead of the wrapper (stricter threshold than the general
-            # fuzzy-dedup one: a wrong substitution is worse than a missed
-            # one). See config.NEWRY_IE_LINK_MATCH_THRESHOLD.
-            if "news.google.com" in resolved_url and newry_ie_candidates:
+            # A Google News link: check for a matching Newry.ie article
+            # BEFORE spending any effort resolving the wrapper link itself
+            # -- a lot of what this feed surfaces already ran on Newry.ie
+            # too, under its own real, always-working link, so there's no
+            # reason to resolve Google's version at all once we know that.
+            # Only once there's no confident match (stricter threshold than
+            # the general fuzzy-dedup one -- a wrong substitution is worse
+            # than a missed one; see config.NEWRY_IE_LINK_MATCH_THRESHOLD)
+            # do we fall back to actually resolving the Google News link.
+            resolved_url = None
+            if "news.google.com" in link and newry_ie_candidates:
                 substitute = find_newry_ie_substitute(normalized, newry_ie_candidates)
                 if substitute:
                     newry_ie_link, score = substitute
                     log.info(
-                        "Substituting Newry.ie link for unresolved Google News article "
-                        "(headline %.2f similar) [%s] %s -> %s",
+                        "Using Newry.ie's link for a Google News story with a matching "
+                        "headline (%.2f similar) [%s] %s -> %s",
                         score, source_name, title, newry_ie_link,
                     )
                     resolved_url = newry_ie_link
 
-            if "news.google.com" in resolved_url:
-                log.warning("Could not resolve Google News link to a real URL (Tiers 1/2), posting wrapper link unless Tier 3 rescues it: %s", link)
+            if resolved_url is None:
+                resolved_url = linkclean.clean_url(link)
+                if "news.google.com" in resolved_url:
+                    log.warning("Could not resolve Google News link to a real URL (Tiers 1/2), posting wrapper link unless Tier 3 rescues it: %s", link)
 
             if linkclean.is_excluded_domain(resolved_url, config.EXCLUDE_DOMAINS):
                 log.info("Skipping (excluded domain) [%s] %s -> %s", source_name, title, resolved_url)
