@@ -469,12 +469,28 @@ def run_events():
     guessing). Google Calendar sync is handled separately by
     sync_calendar() below, not here -- this function is Reddit-only, so
     "run only the calendar work" doesn't also post to Reddit as a side
-    effect. Dedup is by the event's own link only -- unlike news, a single
-    first-party feed doesn't have the "same story, different outlet,
-    different wording" problem that motivates fuzzy-title dedup, so
-    exact-URL dedup is enough. No MAX_POSTS_PER_RUN-style cap: the feed is
-    naturally small (~10 items), and after the first run almost everything
-    in it is already-seen and skipped instantly."""
+    effect.
+
+    Dedup is by exact URL, exact live title, AND fuzzy title (same
+    mechanism main() uses for news, see textutil.is_duplicate_story) --
+    NOT by URL alone, despite an earlier version of this docstring
+    claiming a single first-party feed couldn't have the "same story,
+    different link" problem that motivates fuzzy dedup for news.
+    Confirmed wrong 2026-09-28: newry.ie's own events system split one
+    multi-night show ("Newry Youth Performing Arts presents Dear Evan
+    Hanson") into four separate event listings, one per performance date,
+    sharing one identical title but four different links/IDs -- exact-URL
+    dedup alone posted all four as separate Reddit threads. Also fixes a
+    related bug in the same incident: live_titles/live_urls were fetched
+    once before the loop and never updated as the loop posted, so even the
+    exact-title check missed repeats *within* a single run (all four
+    postings happened 90 seconds apart in one run) -- both live_titles and
+    recent_titles are now updated immediately after each post, same as
+    main()'s loop already does.
+
+    No MAX_POSTS_PER_RUN-style cap: the feed is naturally small (~10
+    items), and after the first run almost everything in it is
+    already-seen and skipped instantly."""
     reddit = load_reddit()
     conn = state.connect()
 
@@ -482,6 +498,7 @@ def run_events():
     if approved:
         log.info("Approved %d of the bot's own post(s) caught by the spam filter", approved)
 
+    recent_titles = state.recent_titles(conn, config.DEDUP_WINDOW_DAYS)
     live_titles, live_urls, _ = moderation.fetch_recent_posts(reddit, config.SUBREDDIT)
 
     processed = 0
@@ -493,6 +510,15 @@ def run_events():
             log.info("Skipping event (already live on r/%s): %s", config.SUBREDDIT, title)
             continue
 
+        normalized = textutil.normalize(title)
+        if textutil.is_duplicate_story(normalized, recent_titles, config.SIMILARITY_THRESHOLD):
+            log.info(
+                "Skipping event (duplicate title -- likely a repeat/multi-date "
+                "Newry.ie listing of something already posted): %s",
+                title,
+            )
+            continue
+
         try:
             moderation.submit_post(reddit, config.SUBREDDIT, link, title[:300], force_category="Events")
             log.info("Posted event: %s -> %s", title, link)
@@ -500,7 +526,10 @@ def run_events():
             log.exception("Failed to submit event post for %s", link)
             continue
 
-        state.record_posted(conn, link, title, textutil.normalize(title))
+        state.record_posted(conn, link, title, normalized)
+        recent_titles.append(normalized)
+        live_titles.add(title)
+        live_urls.add(link)
         processed += 1
         time.sleep(config.SECONDS_BETWEEN_SUBMISSIONS)
 

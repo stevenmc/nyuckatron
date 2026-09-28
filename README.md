@@ -81,7 +81,14 @@ by cron -- no server, nothing kept running between runs.
   Google Calendar via a service account -- entirely independent of each
   other and of Reddit posting, so running one never blocks or requires
   the other. A plain `bot.py` with no argument (what cron actually runs)
-  does all three: news, events-to-Reddit, and calendar sync.
+  does all three: news, events-to-Reddit, and calendar sync. Reddit
+  posting of events is deduped by exact URL, exact title, and fuzzy
+  title (same mechanism as news) -- newry.ie's own events system has
+  been seen splitting one multi-night show into several separate event
+  listings that share one identical title, which exact-URL dedup alone
+  doesn't catch; see "Design notes" below. Calendar sync (`sync_calendar`)
+  is unaffected by this and keeps every distinct date as its own
+  occurrence, which is what you want for a multi-night run.
 
 ## Subreddit sidebar (not managed by this bot)
 

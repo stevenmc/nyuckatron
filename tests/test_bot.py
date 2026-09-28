@@ -1,9 +1,11 @@
 import time
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import bot
 import config
 import linkclean
+import state
 import textutil
 
 
@@ -542,3 +544,73 @@ def test_fetch_entries_routes_a_scrape_homepage_feed_through_the_scraper_not_fee
     results = list(bot.fetch_entries())
 
     assert results == [("Newry story", "https://newry.ie/1", "", "Newry.ie")]
+
+
+# --- run_events: same-title dedup across a multi-date event listing -----
+
+def _fake_reddit_for_run_events():
+    reddit = MagicMock()
+    reddit.subreddit.return_value.new.return_value = []       # nothing else live
+    reddit.subreddit.return_value.mod.spam.return_value = []  # nothing in spam queue
+    return reddit
+
+
+def test_run_events_does_not_repost_a_multi_date_listing_sharing_one_title(monkeypatch, tmp_path):
+    # Regression test for a real incident (2026-09-28): newry.ie's events
+    # system split one multi-night show ("Newry Youth Performing Arts
+    # presents Dear Evan Hanson") into four separate event listings -- one
+    # identical title, four different links/IDs -- and run_events() posted
+    # all four as separate Reddit threads within a single run (90 seconds
+    # apart), because live_titles/live_urls were a snapshot fetched once
+    # before the loop and never updated as the loop itself posted.
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "test_state.db"))
+    reddit = _fake_reddit_for_run_events()
+    monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
+    monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+
+    title = "Newry Youth Performing Arts presents Dear Evan Hanson"
+    events_feed = [
+        (title, "https://www.newry.ie/events/2522-newry-youth-performing-arts-presents-dear-evan-hanson"),
+        (title, "https://www.newry.ie/events/2523-newry-youth-performing-arts-presents-dear-evan-hanson-01-10-2026"),
+        (title, "https://www.newry.ie/events/2524-newry-youth-performing-arts-presents-dear-evan-hanson-02-10-2026"),
+        (title, "https://www.newry.ie/events/2525-newry-youth-performing-arts-presents-dear-evan-hanson-03-10-2026"),
+    ]
+    monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
+
+    bot.run_events()
+
+    reddit.subreddit.return_value.submit.assert_called_once()  # not four times
+
+
+def test_run_events_catches_a_reworded_repeat_from_an_earlier_run_via_state_db(monkeypatch, tmp_path):
+    # Cross-run case, not just within-run: if a near-duplicate listing
+    # (identical or reworded) shows up in a later run, after the original
+    # has scrolled outside Reddit's last-50-posts live listing, the fuzzy
+    # check against state.db's own posted-title history (the same
+    # mechanism main() already relies on for news, see
+    # textutil.is_duplicate_story) is the only thing left to catch it.
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "test_state.db"))
+    conn = state.connect()
+    state.record_posted(
+        conn,
+        "https://www.newry.ie/events/2522-newry-youth-performing-arts-presents-dear-evan-hanson",
+        "Newry Youth Performing Arts presents Dear Evan Hanson",
+        textutil.normalize("Newry Youth Performing Arts presents Dear Evan Hanson"),
+    )
+    conn.close()
+
+    reddit = _fake_reddit_for_run_events()  # live listing no longer has it -- simulates it scrolling off
+    monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
+    monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+
+    events_feed = [
+        (
+            "Dear Evan Hanson performed by Newry Youth Performing Arts",  # reworded, new link
+            "https://www.newry.ie/events/2526-newry-youth-performing-arts-presents-dear-evan-hanson-04-10-2026",
+        ),
+    ]
+    monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
+
+    bot.run_events()
+
+    reddit.subreddit.return_value.submit.assert_not_called()

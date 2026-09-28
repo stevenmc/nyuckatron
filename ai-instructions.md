@@ -569,3 +569,44 @@ entries" means "still current"; if a feed's own freshness matters (as
 opposed to `max_entries`-style position-trust, which this incident shows
 isn't a complete substitute either), periodically sanity-check its
 newest entry's date against reality, not just its structure.**
+
+## `run_events` reposted a multi-date event listing four times (`bot.py`)
+
+**Incident, 2026-09-28: newry.ie's own events system split one multi-night
+show into four separate event listings sharing one identical title, and
+`run_events` posted all four as separate Reddit threads.** "Newry Youth
+Performing Arts presents Dear Evan Hanson" got four event pages
+(`/events/2522-...` through `/events/2525-...-03-10-2026`, one per
+performance date), each a genuinely different URL/ID but an exactly
+identical title. All four posted to Reddit 90 seconds apart, in the same
+run. Two compounding bugs, both fixed the same day:
+
+1. **The old docstring's premise was wrong.** It claimed a single
+   first-party feed couldn't have the "same story, different link"
+   problem that motivates news's fuzzy-title dedup, so exact-URL dedup
+   was "enough." This incident is direct proof otherwise -- newry.ie's
+   own event system can and does produce multiple links for what a reader
+   experiences as one announcement. `run_events` now also runs the exact
+   same fuzzy-title check `main()` already used for news
+   (`textutil.is_duplicate_story` against `state.recent_titles`, same
+   `SIMILARITY_THRESHOLD`). That threshold isn't up for renegotiation even
+   though it occasionally false-positives on short titles -- confirmed
+   with the user 2026-09-25 for the news side (see `config.py`'s
+   `SIMILARITY_THRESHOLD` comment), and it applies here for exactly the
+   same reason: Newry.ie messing up and posting the same thing twice,
+   sometimes under a short title, is the real, recurring failure mode
+   this exists to catch, and that's worth more than avoiding the
+   occasional coincidental false positive.
+2. **`live_titles`/`live_urls` were fetched once before the loop and never
+   updated as the loop itself posted** -- so even the *existing*
+   exact-title check (`title in live_titles`) missed repeats within a
+   single run, because the set it was checking against was already stale
+   by the second event. `main()`'s loop already updates its own
+   `live_titles`/`live_urls`/`recent_titles` after every post for exactly
+   this reason; `run_events` now does the same.
+
+**Calendar sync is deliberately untouched.** `sync_calendar` keeps
+posting all four dates as separate calendar events, which is correct --
+a reader wants each performance date on the calendar, not one merged
+entry. Only the Reddit-posting side had a real duplicate problem; the
+two pipelines' dedup needs are genuinely different, not an oversight.

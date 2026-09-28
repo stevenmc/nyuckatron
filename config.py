@@ -325,6 +325,23 @@ EXCLUDE_DOMAINS = [
 # Two article titles are treated as "the same story" (and only the first is
 # posted) when their token-overlap similarity is >= this value, and the
 # earlier one was posted within DEDUP_WINDOW_DAYS.
+#
+# Deliberately not tuned to avoid every possible false positive -- confirmed
+# with the user 2026-09-25 after a real one (two unrelated short titles both
+# ending in "...-Community Events" scored exactly 0.5 by coincidence, one
+# wrongly skipped for about a day until the other aged out of
+# DEDUP_WINDOW_DAYS). Short titles are more prone to this since the
+# denominator (the smaller title's word count) is small, so a couple of
+# shared filler words can tip the ratio. Left as-is on purpose: the outlets
+# this bot follows genuinely do post the same story twice sometimes,
+# occasionally under a short title, and that's the more costly failure mode
+# to miss. Don't tighten this threshold, add a minimum-word-count guard, or
+# otherwise weaken this check to chase down a short-title false positive
+# without raising it with the user first -- also applies to bot.run_events's
+# same fuzzy-title check for events (added 2026-09-28 after newry.ie's own
+# events system split one multi-night show into several listings sharing
+# one identical title, which is the same class of problem for events that
+# this constant already exists to catch for news).
 SIMILARITY_THRESHOLD = 0.5
 DEDUP_WINDOW_DAYS = 14
 
