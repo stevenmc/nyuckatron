@@ -27,26 +27,34 @@ def test_known_local_outlets_restriction_is_enabled_only_where_it_makes_sense():
     assert by_name["Google News - Newry area"]["restrict_to_known_local_outlets"] is True
 
 
-def test_known_local_outlets_mechanism_still_correctly_rejects_hilltown_dundee():
-    # The real incident that motivated this whole mechanism: a story from
-    # Dundee (which has its own Hilltown district) passes the keyword
-    # filter on "Hilltown" alone, but must still be identifiable as
-    # non-local once its outlet is known -- confirmed here using the exact
-    # three-argument call bot.py actually makes, including the
-    # place-name-in-domain check, to make sure that broader check doesn't
-    # accidentally let this exact case back in (thecourier.co.uk's
-    # hostname doesn't contain "hilltown" -- only the URL path does, which
-    # this check deliberately never looks at).
-    feed = next(f for f in config.FEEDS if f["name"] == "Google News - Newry area")
+def test_hilltown_was_removed_from_catchment_places_over_unmanageable_false_positives():
+    # Originally the motivating case for the known-outlets mechanism
+    # tested below (a Dundee, Scotland "Hilltown" story passing the
+    # keyword filter), but the ambiguity turned out to be worse than one
+    # district in one other city -- confirmed live 2026-10-01 with a
+    # steady stream of unrelated stories (Hilltown Township, PA; a Dundee
+    # bin complaint; an MLB writer's hometown obituary) all matching on
+    # the bare word. The known-outlets domain check can't currently save
+    # this either: while Tier 3 (browser resolution) is unavailable, most
+    # Google News links stay unresolved wrapper links, and
+    # news.google.com is deliberately in KNOWN_LOCAL_OUTLETS as a
+    # fail-open no-op -- so an unresolved "Hilltown" story passes the
+    # domain check trivially too. Removed from the search/keyword terms
+    # entirely rather than trying to out-guess it. See config.py's
+    # CATCHMENT_PLACES comment for the full history.
+    assert "Hilltown" not in config.CATCHMENT_PLACES
 
-    title = "New housing planned for Hilltown area"
-    summary = ""
+
+def test_known_local_outlets_mechanism_still_rejects_an_ambiguous_placename_domain():
+    # The known-outlets domain check (what Hilltown's keyword_filter
+    # removal above works around, rather than relying on) is still
+    # exercised directly and more thoroughly in test_linkclean.py's own
+    # Dundee/Hilltown coverage -- this just confirms bot.py's actual
+    # three-argument call site (KNOWN_LOCAL_OUTLETS,
+    # KNOWN_LOCAL_OUTLET_SUFFIXES, CATCHMENT_PLACES) still rejects a
+    # known-ambiguous outlet domain, independent of whatever specific
+    # words happen to be in CATCHMENT_PLACES today.
     dundee_url = "https://www.thecourier.co.uk/fp/news/dundee/12345/hilltown-housing/"
-
-    haystack = (title + " " + summary).lower()
-    passed_keyword_filter = any(kw.lower() in haystack for kw in feed["keyword_filter"])
-    assert passed_keyword_filter  # confirms this is the exact failure mode -- keyword alone isn't enough
-
     assert not linkclean.is_allowed_domain(
         dundee_url, config.KNOWN_LOCAL_OUTLETS, config.KNOWN_LOCAL_OUTLET_SUFFIXES, config.CATCHMENT_PLACES
     )

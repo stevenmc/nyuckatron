@@ -9,13 +9,17 @@ by cron -- no server, nothing kept running between runs.
 - Pulls entries from the feeds in [config.py](config.py): BBC News NI,
   newry.ie's own editorial output, Newry Democrat's own feed, and a Google
   News RSS search -- see `CATCHMENT_PLACES` in config.py: Newry, Mayobridge,
-  Hilltown, Camlough, Rostrevor, Warrenpoint, Carlingford, Crossmaglen,
-  Lislea, Omeath. Dundalk is deliberately excluded -- it's a substantial
-  town in a different jurisdiction with its own separate news cycle, and
-  including it pulled in a lot of Dundalk-only stories with no real
-  connection to Newry. Newry.ie is scraped from its homepage HTML
-  (`bot.py`'s `_scrape_newry_ie_homepage`), not its RSS feed -- that feed
-  silently stopped updating in practice; see "Design notes" below.
+  Camlough, Rostrevor, Warrenpoint, Carlingford, Crossmaglen, Lislea,
+  Omeath. Dundalk is deliberately excluded -- it's a substantial town in a
+  different jurisdiction with its own separate news cycle, and including
+  it pulled in a lot of Dundalk-only stories with no real connection to
+  Newry. Hilltown was removed 2026-10-01 for the same reason, despite
+  being a genuine catchment town -- "Hilltown" turned out to collide with
+  unrelated places of the same name often enough (Dundee, a Pennsylvania
+  township, and others) to be unmanageable; see "Design notes" below.
+  Newry.ie is scraped from its homepage HTML (`bot.py`'s
+  `_scrape_newry_ie_homepage`), not its RSS feed -- that feed silently
+  stopped updating in practice; see "Design notes" below.
 - Drops anything older than `MAX_NEWS_AGE_DAYS` (by the feed's own
   published/updated date). Newry.ie and Newry Democrat are exempt from
   this specific check -- their own date fields are unreliable (confirmed:
@@ -388,6 +392,22 @@ government departments) and a `CATCHMENT_PLACES` substring-of-domain
 check were added alongside it, for the "once resolution succeeds" case
 and for BBC/Newry.ie/Newry Democrat if they ever need this check too --
 they don't currently, for the reasons in their own `config.py` comments.
+
+**"Hilltown" itself was eventually dropped from `CATCHMENT_PLACES`
+entirely (2026-10-01), after the no-op-while-unresolved gap above made it
+unmanageable in practice:** with Tier 3 (browser resolution) unavailable
+on the EC2 box the bot runs on, most Google News links never get past the
+`news.google.com` wrapper, so `restrict_to_known_local_outlets` really
+was a no-op for most entries, exactly as predicted when it was
+re-enabled -- and "Hilltown" turned out to be ambiguous with more than
+just Dundee: a Pennsylvania township, at minimum, judging by a steady
+stream of unrelated US local-news stories (an animal clinic, a school,
+an MLB writer's obituary) all matching on the bare word with nothing left
+to catch them. Rather than keep expanding `KNOWN_LOCAL_OUTLETS` to chase
+an open-ended set of unrelated outlets, "Hilltown" was removed from the
+search/keyword terms outright -- it's still a real catchment town, this
+is a data-quality workaround for a currently-broken resolution tier, not
+a redrawn boundary, and worth revisiting once Tier 3 is reliable again.
 
 **`KNOWN_LOCAL_OUTLETS` was rebuilt from real evidence, not guessed
 (2026-09-05):** the original list was built from outlets observed during

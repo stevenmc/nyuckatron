@@ -29,10 +29,31 @@ EVENTS_FEED_URL = "https://www.newry.ie/events?format=feed&type=rss"
 # ~40k people with its own council and its own local news cycle, including
 # it as a blanket search term pulled in a lot of Dundalk-only stories with
 # no real connection to Newry.
+#
+# "Hilltown" was removed 2026-10-01 after its false-positive rate became
+# unmanageable -- it's not just ambiguous with Dundee's Hilltown district
+# (the original 2026-09-04 incident that motivated the whole
+# KNOWN_LOCAL_OUTLETS / restrict_to_known_local_outlets mechanism below);
+# there's also a Hilltown Township, Pennsylvania, and evidently others,
+# confirmed live by a steady stream of totally unrelated US/Scottish
+# stories (a Williamsburg animal clinic, an MLB writer's hometown
+# obituary, a Dundee bin-collection complaint...) all matching on the bare
+# word. The known-outlets domain check was *supposed* to catch these on
+# the Google News feed, but can't currently do its job: most Google News
+# links never resolve past the news.google.com wrapper (Tier 3, the
+# browser resolver, is unavailable on the current EC2 box -- see
+# linkclean.GoogleNewsBrowserResolver), and news.google.com itself is
+# deliberately in KNOWN_LOCAL_OUTLETS as a fail-open no-op for exactly
+# that case -- so an unresolved "Hilltown" story passes the domain check
+# trivially regardless of its real origin, leaving keyword_filter as the
+# only actual gate. Revisit once Tier 3 is reliable again (see
+# NEWRY_IE_LINK_MATCH_THRESHOLD's comment for the same EC2-upgrade
+# dependency) -- the underlying place is still genuinely in the
+# catchment area, this is a data-quality workaround, not a redrawn
+# boundary.
 CATCHMENT_PLACES = [
     "Newry",
     "Mayobridge",
-    "Hilltown",
     "Camlough",
     "Rostrevor",
     "Warrenpoint",

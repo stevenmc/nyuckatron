@@ -116,6 +116,24 @@ to revisit any of this, the above is current state, not history** — don't
 re-disable it on the assumption the original 2026-09-05 problem is still
 unaddressed.
 
+**Update, 2026-10-01: "Hilltown" was removed from `CATCHMENT_PLACES`
+entirely** — the no-op-while-unresolved consequence flagged above (**bold**
+paragraph, two above this one) stopped being a tolerable edge case and
+became the day-to-day norm: with Tier 3 (browser resolution) unavailable
+on the EC2 box the bot actually runs on, `restrict_to_known_local_outlets`
+genuinely is a no-op for most Google News entries, so `keyword_filter`
+really was the only gate — exactly as this section already predicted it
+would be "until resolution reliability improves." And "Hilltown" turned
+out to be ambiguous with more than Dundee: confirmed live, a Pennsylvania
+township at minimum, via a steady stream of unrelated US stories (an
+animal clinic, a school, an MLB writer's obituary) matching on the bare
+word. Don't add "Hilltown" back to `CATCHMENT_PLACES` on the assumption
+this was a one-off Dundee problem the known-outlets mechanism already
+handles — it doesn't, currently, for the structural reason above, and
+the fix has to wait for the Tier 3 / EC2 upgrade, not another allowlist
+addition (an unbounded set of unrelated "Hilltown"s somewhere else in the
+English-speaking world isn't something `KNOWN_LOCAL_OUTLETS` can chase).
+
 **`KNOWN_LOCAL_OUTLETS`'s contents were rebuilt from real evidence on
 2026-09-05, replacing a first version that was guessed from a handful of
 live test fetches.** The guessed version missed `newrydemocrat.com`
