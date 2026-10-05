@@ -44,7 +44,11 @@ def build_exchange_rate_markdown(gbp_to_eur):
         return ""
     eur_to_gbp = 1 / gbp_to_eur
     return (
-        "### Exchange Rates\n\n"
+        "**Exchange Rates**  \n"  # bold, not a heading (###) -- confirmed
+        # live 2026-10-05 that Reddit's TextArea widget doesn't give
+        # heading syntax any visual weight, the same way a lone newline
+        # doesn't act as a real line break there either; **bold** does
+        # work, since the event titles already rely on it.
         f"£1 = €{gbp_to_eur:.2f}  \n"
         f"€1 = £{eur_to_gbp:.2f}"
     )

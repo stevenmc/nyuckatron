@@ -40,5 +40,15 @@ def test_build_exchange_rate_markdown_includes_both_directions_with_symbols():
     assert "€1 = £0.85" in markdown  # 1 / 1.18, rounded to 2dp
 
 
+def test_build_exchange_rate_markdown_heading_is_bold_not_a_heading_tag():
+    # Confirmed live 2026-10-05 that a "###" heading gets no visual weight
+    # in Reddit's TextArea widget -- **bold** does, since it's the same
+    # syntax the event titles already use successfully.
+    markdown = exchange_rates.build_exchange_rate_markdown(1.18)
+
+    assert "**Exchange Rates**" in markdown
+    assert "###" not in markdown
+
+
 def test_build_exchange_rate_markdown_returns_empty_string_when_rate_is_none():
     assert exchange_rates.build_exchange_rate_markdown(None) == ""
