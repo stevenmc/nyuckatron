@@ -582,6 +582,8 @@ def test_run_events_does_not_repost_a_multi_date_listing_sharing_one_title(monke
     monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _NO_EVENT_DETAILS)
     monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: None)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "")
 
     title = "Newry Youth Performing Arts presents Dear Evan Hanson"
     events_feed = [
@@ -619,6 +621,8 @@ def test_run_events_catches_a_reworded_repeat_from_an_earlier_run_via_state_db(m
     monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _NO_EVENT_DETAILS)
     monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: None)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "")
 
     events_feed = [
         (
@@ -650,6 +654,8 @@ def test_run_events_builds_and_syncs_widget_from_upcoming_feed_entries(monkeypat
     monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
     monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
     monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: None)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "")
 
     sync_calls = []
     monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
@@ -692,6 +698,8 @@ def test_run_events_widget_update_runs_even_when_event_already_posted(monkeypatc
     monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
     monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
     monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: None)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "")
 
     sync_calls = []
     monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
@@ -713,6 +721,8 @@ def test_run_events_appends_exchange_rate_to_widget_text_when_available(monkeypa
     monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
     monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
     monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: 1.18)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "")
 
     sync_calls = []
     monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
@@ -733,6 +743,8 @@ def test_run_events_omits_exchange_rate_section_when_unavailable(monkeypatch, tm
     monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
     monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
     monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: None)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "")
 
     sync_calls = []
     monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
@@ -740,3 +752,47 @@ def test_run_events_omits_exchange_rate_section_when_unavailable(monkeypatch, tm
     bot.run_events()
 
     assert "Exchange Rates" not in sync_calls[0]
+
+
+def test_run_events_appends_fuel_and_oil_sections_after_exchange_rate(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "test_state.db"))
+    reddit = _fake_reddit_for_run_events()
+    monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
+    monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+
+    events_feed = [("Upcoming Gig", "https://www.newry.ie/events/1")]
+    monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
+    monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
+    monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: 1.18)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "**Cheapest Fuel (Newry area)**  \nPetrol: 163.9p/L at Somewhere")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "**Cheapest Home Heating Oil (500L)**  \n1. Some Supplier — £525.00")
+
+    sync_calls = []
+    monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
+
+    bot.run_events()
+
+    text = sync_calls[0]
+    assert text.index("Exchange Rates") < text.index("Cheapest Fuel") < text.index("Cheapest Home Heating Oil")
+
+
+def test_run_events_omits_fuel_and_oil_sections_when_unavailable(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "test_state.db"))
+    reddit = _fake_reddit_for_run_events()
+    monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
+    monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+
+    events_feed = [("Upcoming Gig", "https://www.newry.ie/events/1")]
+    monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
+    monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
+    monkeypatch.setattr(bot.exchange_rates, "fetch_gbp_eur_rate", lambda: None)
+    monkeypatch.setattr(bot.fuel_prices, "build_fuel_price_markdown", lambda: "")
+    monkeypatch.setattr(bot.heating_oil, "build_heating_oil_markdown", lambda: "")
+
+    sync_calls = []
+    monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
+
+    bot.run_events()
+
+    assert "Cheapest Fuel" not in sync_calls[0]
+    assert "Cheapest Home Heating Oil" not in sync_calls[0]

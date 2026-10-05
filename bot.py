@@ -36,6 +36,8 @@ import config  # noqa: E402
 import events  # noqa: E402
 import events_widget  # noqa: E402
 import exchange_rates  # noqa: E402
+import fuel_prices  # noqa: E402
+import heating_oil  # noqa: E402
 import linkclean  # noqa: E402
 import moderation  # noqa: E402
 import state  # noqa: E402
@@ -501,8 +503,12 @@ def run_events():
     as a probable duplicate, still belongs in the widget if it's
     genuinely upcoming. See events_widget.py for why this can't just be
     the native Reddit Calendar widget already on the sidebar. The same
-    widget also carries a GBP/EUR exchange-rate line below the events
-    list, fetched fresh each run -- see exchange_rates.py."""
+    widget also carries, below the events list: a GBP/EUR exchange rate
+    (exchange_rates.py), the cheapest fresh petrol/diesel price in the
+    Newry area (fuel_prices.py), and the top 3 cheapest 500L heating oil
+    suppliers in NI (heating_oil.py) -- each fetched fresh every run,
+    each independently omitted (not shown as a broken placeholder) if
+    its own fetch fails or has nothing current to show."""
     reddit = load_reddit()
     conn = state.connect()
 
@@ -563,9 +569,13 @@ def run_events():
             upcoming.append((title, link, details["start"], details["end"], details["venue"], None))
 
         markdown = events_widget.build_events_widget_markdown(upcoming)
-        rate_markdown = exchange_rates.build_exchange_rate_markdown(exchange_rates.fetch_gbp_eur_rate())
-        if rate_markdown:
-            markdown += "\n\n" + rate_markdown
+        for section_markdown in (
+            exchange_rates.build_exchange_rate_markdown(exchange_rates.fetch_gbp_eur_rate()),
+            fuel_prices.build_fuel_price_markdown(),
+            heating_oil.build_heating_oil_markdown(),
+        ):
+            if section_markdown:
+                markdown += "\n\n" + section_markdown
         events_widget.sync_events_widget(reddit, config.SUBREDDIT, markdown)
     else:
         log.warning("Events feed returned no entries -- leaving sidebar events widget untouched")
