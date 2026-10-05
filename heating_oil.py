@@ -30,6 +30,18 @@ _SUPPLIER_NAME = re.compile(r"<span[^>]*>#\d+</span>([^<]+)</h3>")
 _PRICE = re.compile(r"<p[^>]*>£([\d,.]+)</p>")
 _UPDATED = re.compile(r"Updated ([^<]+?)</span>")
 
+# niliving.co.uk sits behind Cloudflare, which challenges (403, a JS
+# "Just a moment..." interstitial) the default `python-requests` user
+# agent specifically -- confirmed live 2026-10-06 from the EC2 box (not an
+# IP/datacenter block: the same box passes every time once a real
+# browser-shaped User-Agent and Accept headers are sent, no cookies or JS
+# execution needed).
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
 
 def fetch_top_heating_oil_suppliers(limit=3):
     """(name, price_gbp, updated_text) for the `limit` cheapest 500L
@@ -42,7 +54,7 @@ def fetch_top_heating_oil_suppliers(limit=3):
     (under an hour old), so there's no equivalent stale-price risk here
     to filter against."""
     try:
-        response = requests.get(_URL, timeout=10)
+        response = requests.get(_URL, headers=_HEADERS, timeout=10)
         response.raise_for_status()
     except requests.RequestException:
         log.warning("Could not fetch heating oil prices from %s", _URL)

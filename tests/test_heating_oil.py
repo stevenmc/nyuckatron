@@ -64,6 +64,22 @@ def test_fetch_top_heating_oil_suppliers_respects_the_limit(monkeypatch):
     assert len(suppliers) == 3
 
 
+def test_fetch_top_heating_oil_suppliers_sends_browser_like_headers(monkeypatch):
+    # Regression test for a real bug (2026-10-06): niliving.co.uk sits
+    # behind Cloudflare, which challenges the default `python-requests`
+    # user agent specifically (confirmed live from the EC2 box -- not an
+    # IP/datacenter block, since the same box passes every time once a
+    # real browser-shaped User-Agent is sent).
+    page = _page(panel_500_articles=[_article(1, "Alfa Oils", 525)])
+    get = MagicMock(return_value=_mock_response(page))
+    monkeypatch.setattr(heating_oil.requests, "get", get)
+
+    heating_oil.fetch_top_heating_oil_suppliers()
+
+    _, kwargs = get.call_args
+    assert "Mozilla" in kwargs["headers"]["User-Agent"]
+
+
 def test_fetch_top_heating_oil_suppliers_fixes_the_sites_own_encoding_mismatch(monkeypatch):
     # Regression test for a real bug (2026-10-06): niliving.co.uk's
     # Content-Type header carries no charset, so `requests` defaults to
