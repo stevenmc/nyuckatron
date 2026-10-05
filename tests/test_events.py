@@ -51,6 +51,42 @@ REAL_EVENT_PAGE_WITHOUT_END_DATE = """
 """
 
 
+# Two more real shapes confirmed live 2026-10-05 -- both of these were
+# previously silently dropped entirely (start/end both None) because
+# _parse_event_datetime's strptime call simply raised on anything that
+# wasn't exactly "DD-MM-YYYY H:MM am/pm", and nothing caught the other two
+# real shapes newry.ie actually uses for the "Event Date" row.
+REAL_EVENT_PAGE_WITH_TIME_RANGE = """
+<html><body>
+<table>
+<tr class="eb-event-property">
+    <td class="eb-event-property-label">Event Date</td>
+    <td class="eb-event-property-value">08-10-2026 <span class="eb-event-duration">9:00 pm - 11:55 pm</span></td>
+</tr>
+<tr class="eb-event-property">
+    <td class="eb-event-property-label">Location</td>
+    <td class="eb-event-property-value">Railway Bar</td>
+</tr>
+</table>
+</body></html>
+"""
+
+REAL_EVENT_PAGE_DATE_ONLY = """
+<html><body>
+<table>
+<tr class="eb-event-property">
+    <td class="eb-event-property-label">Event Date</td>
+    <td class="eb-event-property-value">12-10-2026</td>
+</tr>
+<tr class="eb-event-property">
+    <td class="eb-event-property-label">Location</td>
+    <td class="eb-event-property-value">Rostrevor Inn/ Crawfords</td>
+</tr>
+</table>
+</body></html>
+"""
+
+
 def _fake_feed(entries):
     return SimpleNamespace(entries=entries, bozo_exception=None)
 
@@ -120,6 +156,38 @@ def test_fetch_event_details_handles_missing_end_date(monkeypatch):
     assert details["end"] is None
     assert details["venue"] == "Gaeláras Mhic Ardghail"
     assert details["price"] == "Free"
+
+
+def test_fetch_event_details_parses_a_combined_start_end_time_range(monkeypatch):
+    # Regression test for a real incident (2026-10-05): this shape --
+    # "DD-MM-YYYY H:MM am/pm - H:MM am/pm" in a single "Event Date" cell,
+    # with no separate "Event End Date" row -- was previously silently
+    # dropped entirely (start AND end both None), which was quietly
+    # excluding more than half of a given run's events from both the
+    # Reddit posting pipeline and the Calendar/widget sync.
+    monkeypatch.setattr(
+        events.requests, "get", MagicMock(return_value=_mock_get_response(REAL_EVENT_PAGE_WITH_TIME_RANGE))
+    )
+
+    details = events.fetch_event_details("https://www.newry.ie/events/2412-railway-bar-weekly-trad-session")
+
+    assert details["start"] == datetime(2026, 10, 8, 21, 0)
+    assert details["end"] == datetime(2026, 10, 8, 23, 55)
+    assert details["venue"] == "Railway Bar"
+
+
+def test_fetch_event_details_parses_a_date_with_no_time_at_all(monkeypatch):
+    # The third real shape: some events genuinely have no time field at
+    # all on their page (confirmed live, not a scraping gap) -- treated as
+    # a valid start (midnight), not dropped the way it previously was.
+    monkeypatch.setattr(
+        events.requests, "get", MagicMock(return_value=_mock_get_response(REAL_EVENT_PAGE_DATE_ONLY))
+    )
+
+    details = events.fetch_event_details("https://www.newry.ie/events/clare-sands")
+
+    assert details["start"] == datetime(2026, 10, 12, 0, 0)
+    assert details["end"] is None
 
 
 def test_fetch_event_details_returns_all_none_on_network_failure(monkeypatch):

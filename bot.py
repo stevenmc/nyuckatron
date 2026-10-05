@@ -35,6 +35,7 @@ import calendar_sync  # noqa: E402
 import config  # noqa: E402
 import events  # noqa: E402
 import events_widget  # noqa: E402
+import exchange_rates  # noqa: E402
 import linkclean  # noqa: E402
 import moderation  # noqa: E402
 import state  # noqa: E402
@@ -499,7 +500,9 @@ def run_events():
     this function's own dedup: an event already posted, or skipped here
     as a probable duplicate, still belongs in the widget if it's
     genuinely upcoming. See events_widget.py for why this can't just be
-    the native Reddit Calendar widget already on the sidebar."""
+    the native Reddit Calendar widget already on the sidebar. The same
+    widget also carries a GBP/EUR exchange-rate line below the events
+    list, fetched fresh each run -- see exchange_rates.py."""
     reddit = load_reddit()
     conn = state.connect()
 
@@ -560,6 +563,9 @@ def run_events():
             upcoming.append((title, link, details["start"], details["end"], details["venue"], None))
 
         markdown = events_widget.build_events_widget_markdown(upcoming)
+        rate_markdown = exchange_rates.build_exchange_rate_markdown(exchange_rates.fetch_gbp_eur_rate())
+        if rate_markdown:
+            markdown += "\n\n" + rate_markdown
         events_widget.sync_events_widget(reddit, config.SUBREDDIT, markdown)
     else:
         log.warning("Events feed returned no entries -- leaving sidebar events widget untouched")

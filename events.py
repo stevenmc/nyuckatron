@@ -38,6 +38,24 @@ _WHITESPACE = re.compile(r"\s+")
 # implying otherwise -- verified against real captured examples.
 _DATE_FORMAT = "%d-%m-%Y %I:%M %p"
 
+# Two more real shapes confirmed 2026-10-05, both for the "Event Date" row
+# specifically (not a separate "Event End Date" row, which still uses
+# _DATE_FORMAT above and is parsed as before):
+#
+# 1. Date with no time at all: "12-10-2026" -- some events genuinely don't
+#    have one (confirmed live, not a scraping gap).
+# 2. Date with a start-end time *range* in one field: "08-10-2026 9:00 pm -
+#    11:55 pm" -- seen on several events, most (though not all) weekly
+#    recurring ones. Before this was handled, _parse_event_datetime's
+#    strptime call 400'd on the trailing " - 11:55 pm" and silently
+#    returned None for the whole event -- confirmed live, this was
+#    dropping more than half of a given run's events entirely.
+_DATE_ONLY_FORMAT = "%d-%m-%Y"
+_DATE_TIME_RANGE = re.compile(
+    r"^(\d{2}-\d{2}-\d{4})\s+(\d{1,2}:\d{2}\s*[ap]m)\s*-\s*(\d{1,2}:\d{2}\s*[ap]m)$",
+    re.IGNORECASE,
+)
+
 # Event pages give naive local times with no timezone marker -- calendar_sync.py
 # already assumes these are Europe/London wall-clock time when it submits them
 # to Google Calendar (its _TIMEZONE constant), so is_in_the_past uses the same
@@ -86,7 +104,31 @@ def _parse_event_datetime(text):
     try:
         return datetime.strptime(text, _DATE_FORMAT)
     except ValueError:
+        pass
+    try:
+        return datetime.strptime(text, _DATE_ONLY_FORMAT)
+    except ValueError:
         return None
+
+
+def _parse_event_date_row(text):
+    """Parses the "Event Date" row's value specifically, which (unlike
+    "Event End Date") can take any of three real shapes: a single
+    date+time (_parse_event_datetime handles that directly), a bare date
+    with no time, or a date with a start-end time range in one field (see
+    _DATE_TIME_RANGE's comment). Returns (start, end) -- end is only ever
+    non-None here when a range was present; a plain single-time or
+    date-only value returns (start, None), leaving end for a separate
+    "Event End Date" row to fill in, same as before."""
+    start = _parse_event_datetime(text)
+    if start is not None:
+        return start, None
+
+    match = _DATE_TIME_RANGE.match(text)
+    if not match:
+        return None, None
+    date_str, start_str, end_str = match.groups()
+    return _parse_event_datetime(f"{date_str} {start_str}"), _parse_event_datetime(f"{date_str} {end_str}")
 
 
 def fetch_event_details(link, timeout=8):
@@ -106,7 +148,9 @@ def fetch_event_details(link, timeout=8):
         label = label.strip()
         value = _clean_text(value)
         if label == "Event Date":
-            details["start"] = _parse_event_datetime(value)
+            details["start"], range_end = _parse_event_date_row(value)
+            if range_end is not None:
+                details["end"] = range_end
         elif label == "Event End Date":
             details["end"] = _parse_event_datetime(value)
         elif label == "Location":

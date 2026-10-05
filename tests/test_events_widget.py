@@ -75,6 +75,42 @@ def test_build_events_widget_markdown_returns_placeholder_text_for_empty_list():
     assert "no upcoming events" in markdown.lower()
 
 
+def test_build_events_widget_markdown_has_no_redundant_heading():
+    # The widget's own shortName ("Upcoming Events (Links)") already says
+    # this -- a duplicate first line in the body is just noise.
+    markdown = events_widget.build_events_widget_markdown([_event(title="Some Event")])
+    assert "upcoming events" not in markdown.lower()
+
+
+def test_build_events_widget_markdown_uses_hard_line_breaks():
+    # A single newline inside one Markdown list item is a soft break that
+    # most renderers (Reddit's included) collapse back into one run-on
+    # line -- each content line needs a trailing-double-space hard break
+    # to actually render as two separate lines. Two events, so the first
+    # event's lines aren't the very end of the whole string (where a
+    # trailing hard break wouldn't matter and gets stripped anyway).
+    markdown = events_widget.build_events_widget_markdown(
+        [
+            _event(title="First Event", start=datetime(2026, 10, 11, 19, 0), venue="A Venue"),
+            _event(title="Second Event", start=datetime(2026, 10, 12, 19, 0), venue="Another Venue"),
+        ]
+    )
+    lines = markdown.split("\n")
+    assert lines[0].endswith("  ")  # the linked-title line
+    assert lines[1].endswith("  ")  # the date/venue line
+
+
+def test_build_events_widget_markdown_omits_the_time_for_a_date_only_event():
+    # Some newry.ie events genuinely have no time field at all -- parsed
+    # as midnight (see events._parse_event_date_row), which should read as
+    # "no known time", not "starts at 12:00 am".
+    markdown = events_widget.build_events_widget_markdown(
+        [_event(title="Date Only Event", start=datetime(2026, 10, 12, 0, 0), venue="A Venue")]
+    )
+    assert "12:00 am" not in markdown.lower()
+    assert "Mon 12 Oct · A Venue" in markdown
+
+
 # --- sync_events_widget (mocked praw) -------------------------------------
 
 def _fake_widget(short_name):
