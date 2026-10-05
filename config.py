@@ -22,6 +22,21 @@ DEFAULT_EVENT_DURATION_HOURS = 1
 
 EVENTS_FEED_URL = "https://www.newry.ie/events?format=feed&type=rss"
 
+# r/newry's native sidebar "Calendar" widget ("Upcoming events") can't show
+# per-event links at all -- confirmed by reading praw's widgets.py directly
+# and inspecting the live widget's own data: its configuration schema is
+# only six display-toggle fields, and its data has no URL field, even
+# though calendar_sync.py already writes a real link into every event.
+# bot.run_events() (via events_widget.py) instead creates/updates a second,
+# bot-owned sidebar TextArea widget under this exact name -- a list of
+# Markdown links -- every run. Keep this under 30 characters: praw/Reddit's
+# own limit on a widget's shortName.
+EVENTS_WIDGET_SHORT_NAME = "Upcoming Events (Links)"
+
+# Empty values inherit the subreddit's default widget theme. Confirm this
+# looks right during the dry-run/visual-check step before relying on it.
+EVENTS_WIDGET_STYLES = {"backgroundColor": "", "headerColor": ""}
+
 # Towns/villages in r/newry's actual catchment area -- a story is in-scope
 # if it mentions any one of these, not just "Newry" itself.
 #

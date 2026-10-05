@@ -34,6 +34,7 @@ load_dotenv()
 import calendar_sync  # noqa: E402
 import config  # noqa: E402
 import events  # noqa: E402
+import events_widget  # noqa: E402
 import linkclean  # noqa: E402
 import moderation  # noqa: E402
 import state  # noqa: E402
@@ -490,7 +491,15 @@ def run_events():
 
     No MAX_POSTS_PER_RUN-style cap: the feed is naturally small (~10
     items), and after the first run almost everything in it is
-    already-seen and skipped instantly."""
+    already-seen and skipped instantly.
+
+    Also keeps a second sidebar widget (config.EVENTS_WIDGET_SHORT_NAME, a
+    Markdown TextArea) in sync with every currently-upcoming event in the
+    feed -- unlike the posting loop above, this is NOT gated by any of
+    this function's own dedup: an event already posted, or skipped here
+    as a probable duplicate, still belongs in the widget if it's
+    genuinely upcoming. See events_widget.py for why this can't just be
+    the native Reddit Calendar widget already on the sidebar."""
     reddit = load_reddit()
     conn = state.connect()
 
@@ -501,8 +510,10 @@ def run_events():
     recent_titles = state.recent_titles(conn, config.DEDUP_WINDOW_DAYS)
     live_titles, live_urls, _ = moderation.fetch_recent_posts(reddit, config.SUBREDDIT)
 
+    feed_events = list(events.fetch_event_feed(config.EVENTS_FEED_URL))
+
     processed = 0
-    for title, link in events.fetch_event_feed(config.EVENTS_FEED_URL):
+    for title, link in feed_events:
         if state.url_already_posted(conn, link):
             continue
 
@@ -534,6 +545,25 @@ def run_events():
         time.sleep(config.SECONDS_BETWEEN_SUBMISSIONS)
 
     conn.close()
+
+    # A feed that returned zero raw entries is a probable fetch failure,
+    # not "no events" (see ai-instructions.md's stale-RSS-feed incident
+    # for why this distinction matters elsewhere in this project) --
+    # leave the widget showing whatever it last had rather than
+    # overwriting good content with a false "no events" message.
+    if feed_events:
+        upcoming = []
+        for title, link in feed_events:
+            details = events.fetch_event_details(link)
+            if details["start"] is None or events.is_in_the_past(details["start"]):
+                continue
+            upcoming.append((title, link, details["start"], details["end"], details["venue"], None))
+
+        markdown = events_widget.build_events_widget_markdown(upcoming)
+        events_widget.sync_events_widget(reddit, config.SUBREDDIT, markdown)
+    else:
+        log.warning("Events feed returned no entries -- leaving sidebar events widget untouched")
+
     log.info("Events run complete. Processed %d new event(s).", processed)
 
 

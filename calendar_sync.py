@@ -89,10 +89,17 @@ def event_id_for(link):
 
 
 def sync_event(title, link, start, end, venue, description=""):
-    """Upserts one event into the configured Google Calendar. Returns True
-    on success, False otherwise (including when Calendar integration isn't
-    configured, or the event has no usable start time) -- never raises, so
-    a Calendar failure never blocks the independent Reddit-posting path."""
+    """Upserts one event into the configured Google Calendar. Returns the
+    event's Calendar `htmlLink` (a real, truthy URL string) on success, or
+    a falsy value (None or False) otherwise (including when Calendar
+    integration isn't configured, or the event has no usable start time)
+    -- never raises, so a Calendar failure never blocks the independent
+    Reddit-posting path. Callers that only care about success/failure can
+    keep using this in a plain `if sync_event(...):` check, same as before
+    this returned a bare bool -- any non-empty string is truthy. The
+    htmlLink itself exists to let a caller fall back to linking the
+    Calendar entry directly when no better link is available (see
+    events_widget.py) -- it was previously fetched and discarded."""
     if not is_configured():
         global _warned_not_configured
         if not _warned_not_configured:
@@ -101,11 +108,11 @@ def sync_event(title, link, start, end, venue, description=""):
                 "and GOOGLE_CALENDAR_ID in .env to enable) -- skipping calendar sync."
             )
             _warned_not_configured = True
-        return False
+        return None
 
     if start is None:
         log.warning("No start time for event '%s', skipping calendar sync: %s", title, link)
-        return False
+        return None
 
     if end is None:
         end = start + timedelta(hours=config.DEFAULT_EVENT_DURATION_HOURS)
@@ -145,7 +152,7 @@ def sync_event(title, link, start, end, venue, description=""):
             )
         response.raise_for_status()
         log.info("Synced event to calendar: %s", title)
-        return True
+        return response.json().get("htmlLink") or True  # always a URL in practice; `or True` only guards a malformed/missing field, keeping this truthy on genuine success
     except Exception:
         log.exception("Failed to sync event '%s' to calendar", title)
-        return False
+        return None

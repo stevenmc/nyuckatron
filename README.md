@@ -92,30 +92,51 @@ by cron -- no server, nothing kept running between runs.
   listings that share one identical title, which exact-URL dedup alone
   doesn't catch; see "Design notes" below. Calendar sync (`sync_calendar`)
   is unaffected by this and keeps every distinct date as its own
-  occurrence, which is what you want for a multi-night run.
+  occurrence, which is what you want for a multi-night run. `run_events`
+  also keeps a bot-managed sidebar widget of clickable event links in
+  sync every run (`events_widget.py`) -- see "Subreddit sidebar" below.
 
-## Subreddit sidebar (not managed by this bot)
+## Subreddit sidebar
 
-The subreddit's sidebar carries a couple of Reddit calendar widgets that
-are entirely outside this project -- not fetched, scheduled, or touched
-by any code here. Documented for anyone maintaining the subreddit later,
-so it's clear where to actually go to change them rather than looking for
-them in this codebase.
+Most of the subreddit's sidebar is Reddit configuration, entirely outside
+this project. One widget, added 2026-10-05, *is* managed by this bot.
+Documented here so anyone maintaining the subreddit later knows which is
+which, rather than guessing from the sidebar alone.
 
 - **Reddit sidebars in general are not controlled by this bot.** Rules,
   widgets, calendars -- anything in the sidebar is subreddit
   configuration, edited through Reddit's own mod tools, independent of
-  everything above.
-- **Weather** is a Google Calendar on Steven's own Google account,
-  sourced from Meteomatics' public ICS feed for Newry:
+  everything below, with one exception (next bullet).
+- **"Upcoming Events (Links)"** (a Markdown TextArea widget) *is* managed
+  by this bot -- `bot.run_events()` creates/updates it every run (see
+  `events_widget.py`). It lists the same upcoming events as the native
+  "Upcoming events" Calendar widget below, as clickable Markdown links to
+  each event's real newry.ie page. Don't hand-edit its text in Reddit's
+  UI -- the next run overwrites it. Added because Reddit's native
+  Calendar widget type has no way to show a per-event link at all (its
+  `configuration` schema is six display-toggle fields, nothing more --
+  confirmed by reading praw's `widgets.py` directly), even though
+  `calendar_sync.py` already writes a real link into every event it
+  syncs. The native "Upcoming events" widget is intended to be removed
+  manually once this one's confirmed working well, not run side-by-side
+  long-term.
+- **"Upcoming events"** is Reddit's native Calendar widget, connected to
+  the same Google Calendar `calendar_sync.py` writes to -- not fetched or
+  touched by any code here (Reddit polls that calendar directly), but
+  worth knowing it's the same underlying event data as the bot-managed
+  widget above, just without links.
+- **Weather** is a different Google Calendar, on Steven's own Google
+  account, sourced from Meteomatics' public ICS feed for Newry:
   `webcal://ical.meteomatics.com/calendar/Newry/54.175102_-6.34023/en/meteomat.ics`.
   Reddit's calendar widget polls that calendar directly -- no newry-bot
   code is involved anywhere in this path.
 - **Currency** (EUR/GBP) is set up the same way -- a Google Calendar --
-  but isn't currently shown on the sidebar, because Reddit caps how many
-  calendar widgets a subreddit can display. If it's added back, its data
-  isn't manually maintained either: a daily Google Apps Script named
-  `EURtoGBPRedditSidebar`, also running on Steven's account, populates it.
+  but isn't currently shown on the sidebar: Reddit caps how many Calendar
+  widgets a subreddit can display, and "Upcoming events" + "Weather"
+  already use both slots. If it's added back (by removing one of those
+  two), its data isn't manually maintained either: a daily Google Apps
+  Script named `EURtoGBPRedditSidebar`, also running on Steven's account,
+  populates it.
 
 ## Setup
 

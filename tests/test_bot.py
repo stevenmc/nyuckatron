@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -558,9 +559,13 @@ def test_fetch_entries_routes_a_scrape_homepage_feed_through_the_scraper_not_fee
 
 def _fake_reddit_for_run_events():
     reddit = MagicMock()
-    reddit.subreddit.return_value.new.return_value = []       # nothing else live
-    reddit.subreddit.return_value.mod.spam.return_value = []  # nothing in spam queue
+    reddit.subreddit.return_value.new.return_value = []          # nothing else live
+    reddit.subreddit.return_value.mod.spam.return_value = []     # nothing in spam queue
+    reddit.subreddit.return_value.widgets.sidebar = []            # no existing sidebar widgets
     return reddit
+
+
+_NO_EVENT_DETAILS = {"start": None, "end": None, "venue": None, "price": None}
 
 
 def test_run_events_does_not_repost_a_multi_date_listing_sharing_one_title(monkeypatch, tmp_path):
@@ -575,6 +580,7 @@ def test_run_events_does_not_repost_a_multi_date_listing_sharing_one_title(monke
     reddit = _fake_reddit_for_run_events()
     monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
     monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _NO_EVENT_DETAILS)
 
     title = "Newry Youth Performing Arts presents Dear Evan Hanson"
     events_feed = [
@@ -610,6 +616,7 @@ def test_run_events_catches_a_reworded_repeat_from_an_earlier_run_via_state_db(m
     reddit = _fake_reddit_for_run_events()  # live listing no longer has it -- simulates it scrolling off
     monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
     monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _NO_EVENT_DETAILS)
 
     events_feed = [
         (
@@ -622,3 +629,71 @@ def test_run_events_catches_a_reworded_repeat_from_an_earlier_run_via_state_db(m
     bot.run_events()
 
     reddit.subreddit.return_value.submit.assert_not_called()
+
+
+# --- run_events: sidebar events widget sync -------------------------------
+
+def _future_details(days_ahead=1, venue="Some Venue"):
+    start = datetime.now() + timedelta(days=days_ahead)
+    return {"start": start, "end": start + timedelta(hours=2), "venue": venue, "price": None}
+
+
+def test_run_events_builds_and_syncs_widget_from_upcoming_feed_entries(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "test_state.db"))
+    reddit = _fake_reddit_for_run_events()
+    monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
+    monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+
+    events_feed = [("Upcoming Gig", "https://www.newry.ie/events/1")]
+    monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
+    monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
+
+    sync_calls = []
+    monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
+
+    bot.run_events()
+
+    assert len(sync_calls) == 1
+    assert "Upcoming Gig" in sync_calls[0]
+    assert "https://www.newry.ie/events/1" in sync_calls[0]
+
+
+def test_run_events_skips_widget_update_when_feed_returns_zero_entries(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "test_state.db"))
+    reddit = _fake_reddit_for_run_events()
+    monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
+    monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter([]))
+
+    called = []
+    monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda *a, **kw: called.append(True))
+
+    bot.run_events()
+
+    assert called == []  # zero entries is a probable fetch failure, not "no events" -- leave the widget alone
+
+
+def test_run_events_widget_update_runs_even_when_event_already_posted(monkeypatch, tmp_path):
+    # The widget pass is independent of the posting loop's own dedup: an
+    # event already live on Reddit still belongs in the widget if it's
+    # genuinely upcoming.
+    monkeypatch.setattr(config, "STATE_DB_PATH", str(tmp_path / "test_state.db"))
+    reddit = _fake_reddit_for_run_events()
+    reddit.subreddit.return_value.new.return_value = [
+        SimpleNamespace(title="Already Posted Gig", url="https://www.newry.ie/events/1", flair=MagicMock())
+    ]
+    monkeypatch.setattr(bot, "load_reddit", lambda: reddit)
+    monkeypatch.setattr(bot.time, "sleep", lambda seconds: None)
+
+    events_feed = [("Already Posted Gig", "https://www.newry.ie/events/1")]
+    monkeypatch.setattr(bot.events, "fetch_event_feed", lambda url: iter(events_feed))
+    monkeypatch.setattr(bot.events, "fetch_event_details", lambda link: _future_details())
+
+    sync_calls = []
+    monkeypatch.setattr(bot.events_widget, "sync_events_widget", lambda reddit, sub, markdown: sync_calls.append(markdown))
+
+    bot.run_events()
+
+    reddit.subreddit.return_value.submit.assert_not_called()  # already live -- not reposted
+    assert len(sync_calls) == 1
+    assert "Already Posted Gig" in sync_calls[0]  # but still shown in the widget

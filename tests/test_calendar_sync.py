@@ -31,7 +31,7 @@ def test_sync_event_noop_when_not_configured(monkeypatch):
 
     result = calendar_sync.sync_event("Some Event", "https://www.newry.ie/events/1", datetime.now(), None, "Venue")
 
-    assert result is False
+    assert not result
 
 
 def test_sync_event_returns_false_with_no_start_time(monkeypatch):
@@ -42,7 +42,7 @@ def test_sync_event_returns_false_with_no_start_time(monkeypatch):
 
     result = calendar_sync.sync_event("Some Event", "https://www.newry.ie/events/1", None, None, "Venue")
 
-    assert result is False
+    assert not result
 
 
 def test_event_id_for_is_deterministic_and_calendar_id_shaped():
@@ -60,10 +60,11 @@ def test_event_id_for_is_deterministic_and_calendar_id_shaped():
     assert re.fullmatch(r"[a-v0-9]{5,1024}", id_a)
 
 
-def _mock_response(status_code):
+def _mock_response(status_code, html_link="https://www.google.com/calendar/event?eid=fake"):
     resp = MagicMock()
     resp.status_code = status_code
     resp.raise_for_status = MagicMock()
+    resp.json = MagicMock(return_value={"htmlLink": html_link})
     if status_code >= 400 and status_code != 404:
         import requests
 
@@ -89,7 +90,7 @@ def test_sync_event_updates_existing_event_when_put_succeeds(monkeypatch):
         "Newry Market",
     )
 
-    assert result is True
+    assert result == "https://www.google.com/calendar/event?eid=fake"
     mock_put.assert_called_once()
 
 
@@ -107,7 +108,7 @@ def test_sync_event_falls_back_to_insert_when_update_404s(monkeypatch):
         "New Event", "https://www.newry.ie/events/9999-new-event", datetime(2026, 9, 6, 11, 0), None, "Some Venue"
     )
 
-    assert result is True
+    assert result == "https://www.google.com/calendar/event?eid=fake"
     mock_put.assert_called_once()
     mock_post.assert_called_once()
 
@@ -143,4 +144,4 @@ def test_sync_event_returns_false_and_does_not_raise_on_request_failure(monkeypa
         "Event", "https://www.newry.ie/events/1", datetime(2026, 9, 6, 11, 0), None, "Venue"
     )
 
-    assert result is False  # should not raise
+    assert not result  # should not raise
