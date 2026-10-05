@@ -76,8 +76,9 @@ def test_build_events_widget_markdown_returns_placeholder_text_for_empty_list():
 
 
 def test_build_events_widget_markdown_has_no_redundant_heading():
-    # The widget's own shortName ("Upcoming Events (Links)") already says
-    # this -- a duplicate first line in the body is just noise.
+    # The widget's own shortName (config.EVENTS_WIDGET_SHORT_NAME,
+    # "Upcoming Events") already says this -- a duplicate first line in
+    # the body is just noise.
     markdown = events_widget.build_events_widget_markdown([_event(title="Some Event")])
     assert "upcoming events" not in markdown.lower()
 

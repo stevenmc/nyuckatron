@@ -22,16 +22,26 @@ DEFAULT_EVENT_DURATION_HOURS = 1
 
 EVENTS_FEED_URL = "https://www.newry.ie/events?format=feed&type=rss"
 
-# r/newry's native sidebar "Calendar" widget ("Upcoming events") can't show
-# per-event links at all -- confirmed by reading praw's widgets.py directly
-# and inspecting the live widget's own data: its configuration schema is
-# only six display-toggle fields, and its data has no URL field, even
-# though calendar_sync.py already writes a real link into every event.
-# bot.run_events() (via events_widget.py) instead creates/updates a second,
-# bot-owned sidebar TextArea widget under this exact name -- a list of
-# Markdown links -- every run. Keep this under 30 characters: praw/Reddit's
-# own limit on a widget's shortName.
-EVENTS_WIDGET_SHORT_NAME = "Upcoming Events (Links)"
+# r/newry's native sidebar "Calendar" widget couldn't show per-event
+# links at all -- confirmed by reading praw's widgets.py directly and
+# inspecting its live data: its configuration schema is only six
+# display-toggle fields, and its data has no URL field, even though
+# calendar_sync.py already writes a real link into every event. It's
+# since been removed from the sidebar. bot.run_events() (via
+# events_widget.py) creates/updates a bot-owned sidebar TextArea widget
+# under this exact name -- a list of Markdown links -- every run.
+#
+# Originally "Upcoming Events (Links)"; renamed 2026-10-06 to match a
+# manual rename+reposition the user did directly in Reddit's widget
+# editor (to plain "Upcoming Events") -- sync_events_widget finds the
+# existing widget to update by matching this name exactly, so this
+# constant has to track whatever the widget is actually called on Reddit
+# right now, not the other way around. If it's ever renamed again in
+# Reddit's UI, update this to match or the next run will create a
+# duplicate instead of updating it (confirmed live: that's exactly what
+# happened the one time this fell out of sync). Keep it under 30
+# characters: praw/Reddit's own limit on a widget's shortName.
+EVENTS_WIDGET_SHORT_NAME = "Upcoming Events"
 
 # Empty values inherit the subreddit's default widget theme. Confirm this
 # looks right during the dry-run/visual-check step before relying on it.
