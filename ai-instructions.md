@@ -628,3 +628,101 @@ posting all four dates as separate calendar events, which is correct --
 a reader wants each performance date on the calendar, not one merged
 entry. Only the Reddit-posting side had a real duplicate problem; the
 two pipelines' dedup needs are genuinely different, not an oversight.
+
+## Sidebar events widget: clickable links, exchange rate, fuel, heating oil (`events_widget.py`, `exchange_rates.py`, `fuel_prices.py`, `heating_oil.py`)
+
+**Added 2026-10-05 because Reddit's native "Calendar" widget cannot show
+a per-event link at all, confirmed two ways** -- reading praw's
+`widgets.py` directly (the `Calendar` widget's `configuration` schema is
+six display-toggle booleans/counts, nothing else; its `data` has no URL
+field) and inspecting the live widget's own data on r/newry (no URL of
+any kind per event), even though `calendar_sync.py` already writes a
+real link into every event it syncs. Not fixable by reconfiguring the
+existing widget -- it has to be a second, bot-managed one.
+`bot.run_events()` creates/updates a Markdown TextArea widget
+(`config.EVENTS_WIDGET_SHORT_NAME`) every run via `events_widget.py`,
+listing every currently-upcoming event as `[Title](newry.ie link)`,
+independent of the posting loop's own dedup (an event already posted,
+or skipped as a probable duplicate, still belongs in the widget if it's
+genuinely upcoming).
+
+**Incident, 2026-10-06: the user renamed and repositioned the widget
+directly in Reddit's UI, and the next run created a duplicate instead
+of updating it.** `sync_events_widget` finds the widget to update by
+matching `shortName` exactly against `config.EVENTS_WIDGET_SHORT_NAME`
+-- once the live widget's name no longer matched that constant, the
+lookup found nothing and fell through to creating a brand new one.
+Fixed by updating the constant to the new name and manually deleting the
+stray duplicate on the live subreddit. **If this widget is ever renamed
+or repositioned again in Reddit's UI, `EVENTS_WIDGET_SHORT_NAME` must be
+updated to match in the same change** -- there's no way for the code to
+detect a rename on its own; it will just look like "no existing widget
+found" and quietly create a second one.
+
+**A single newline inside one Markdown list item renders as one
+run-on line on Reddit, confirmed live the same day.** The first deployed
+version put each event's title and date/venue on two separate source
+lines inside one bullet, expecting a plain `\n` to produce two visible
+lines -- Reddit's renderer (like most CommonMark renderers) treats a
+lone newline inside a list item as a soft break and collapses it back
+into one line. Fixed with the standard Markdown hard-break convention:
+two trailing spaces before the newline. The venue line was later split
+out from the date line the same way, for three hard-broken lines per
+event instead of two. **Any new line added to this widget's text needs
+the same trailing-double-space treatment, or it won't actually break.**
+
+**A `###` Markdown heading got no visual weight in the widget either,
+confirmed live 2026-10-06 (the Exchange Rates section).** Switched to
+`**bold**` instead, which does work -- the event titles already relied
+on the same bold syntax successfully. Don't assume standard Markdown
+heading syntax renders with any emphasis in this specific widget type;
+verify against the live widget before trusting a new formatting choice,
+the same way the line-break discovery above had to be.
+
+**`fuel_prices.py`'s cheapest-petrol/diesel lookup needed its own
+freshness filter for the same underlying reason `NEWRY_IE_LINK_MATCH_
+THRESHOLD` and the Newry-feed-staleness incidents exist elsewhere in
+this project: an external source's own "best"/"cheapest" sort doesn't
+account for how current the underlying data actually is.** Confirmed
+live 2026-10-06 against fuelcosts.co.uk's API (built on the UK
+Government's Fuel Finder open data scheme): sorting by price alone
+routinely surfaced a station whose price hadn't changed -- i.e. hadn't
+been confirmed current -- in weeks, one case over 6 months, ahead of
+several genuinely fresh, only slightly pricier stations further down
+the same list. `MAX_PRICE_AGE_DAYS` (3) filters out anything whose
+`price_last_updated` is older than that before picking the cheapest of
+what's left, rather than trusting the API's own ranking at face value.
+
+**`heating_oil.py` hit two real bugs during development, both confirmed
+live, neither visible from reading the code alone:**
+1. niliving.co.uk's `Content-Type` header carries no charset, so
+   `requests` defaults to the HTTP-spec fallback (ISO-8859-1) even
+   though the page is actually UTF-8 -- every "£" silently became "Â£",
+   which matched no price at all. The failure mode was total silence
+   (empty results), not a visibly wrong price, which is what made it
+   easy to miss. Fixed by setting `response.encoding = "utf-8"`
+   explicitly before reading `.text`.
+2. niliving.co.uk sits behind Cloudflare, which challenged (403, a JS
+   "Just a moment..." interstitial) the plain `python-requests` user
+   agent specifically when run from the EC2 box -- but not from a dev
+   machine, which made it look like an IP/datacenter block at first.
+   Confirmed it wasn't: the same EC2 box passed consistently once a
+   real browser-shaped `User-Agent`/`Accept`/`Accept-Language` header
+   set was sent, no cookies or JS execution needed. **If any future
+   external fetch in this project 403s from the EC2 box but works fine
+   locally, check the User-Agent before assuming it's an IP-based
+   block** -- this is the second time in the project (after
+   `cheapestoil.co.uk`'s outright block) that a site's bot-detection
+   turned out to be header-based rather than IP-based.
+
+**"Newry" and "Supermarket" are deliberately stripped from every fuel
+station and oil supplier name shown (`_clean_name`, duplicated
+independently in `fuel_prices.py` and `heating_oil.py` rather than
+shared -- consistent with this project's existing preference for not
+coupling otherwise-independent modules together over a few lines of
+logic).** Nearly every station within `fuel_prices.py`'s search radius
+is "in Newry" by definition, so a trailing ", Newry" on every single
+line was pure noise once actually seen rendered; several real station
+names are also literally "X Supermarket". The comma immediately before
+"Newry" is stripped along with the word itself so a removed word never
+leaves a dangling comma behind.
