@@ -11,6 +11,7 @@ that got past it), while niliving.co.uk works with no special handling
 at all, same as every other site this project talks to.
 """
 
+import html
 import logging
 import re
 
@@ -29,6 +30,17 @@ _ARTICLE = re.compile(r"<article.*?</article>", re.DOTALL)
 _SUPPLIER_NAME = re.compile(r"<span[^>]*>#\d+</span>([^<]+)</h3>")
 _PRICE = re.compile(r"<p[^>]*>£([\d,.]+)</p>")
 _UPDATED = re.compile(r"Updated ([^<]+?)</span>")
+
+# Display cleanup, same rule as fuel_prices.py's own _clean_name (kept
+# independent rather than shared -- see this project's established
+# preference for not coupling otherwise-independent modules together):
+# strip "Newry" (and a comma immediately before it, if any) and
+# "Supermarket" wherever they appear in a supplier's name.
+_STRIP_WORDS = re.compile(r",?\s*\b(?:Newry|Supermarket)\b", re.IGNORECASE)
+
+
+def _clean_name(text):
+    return re.sub(r"\s+", " ", _STRIP_WORDS.sub("", text)).strip(" ,")
 
 # niliving.co.uk sits behind Cloudflare, which challenges (403, a JS
 # "Just a moment..." interstitial) the default `python-requests` user
@@ -83,7 +95,7 @@ def fetch_top_heating_oil_suppliers(limit=3):
         updated_match = _UPDATED.search(article)
         suppliers.append(
             (
-                name_match.group(1).strip(),
+                html.unescape(name_match.group(1).strip()),
                 float(price_match.group(1).replace(",", "")),
                 updated_match.group(1).strip() if updated_match else None,
             )
@@ -103,5 +115,6 @@ def build_heating_oil_markdown():
 
     lines = ["**Cheapest Home Heating Oil (500L)**  "]
     for i, (name, price, _updated) in enumerate(suppliers, start=1):
+        name = _clean_name(name) or name  # never show a blank name if cleaning strips everything
         lines.append(f"{i}. {name} — £{price:.2f}  ")
     return "\n".join(lines).rstrip()

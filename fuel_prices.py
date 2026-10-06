@@ -18,6 +18,7 @@ show a reader an outdated price as if it were current.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 import requests
@@ -25,6 +26,17 @@ import requests
 log = logging.getLogger("newry-bot")
 
 _API_URL = "https://fuelcosts.co.uk/api/stations"
+
+# Display cleanup: nearly everything within _RADIUS_MILES is "in Newry"
+# by definition, so a trailing ", Newry" on every single line is just
+# noise -- strip the word (and a comma immediately before it, if any)
+# wherever it appears. "Supermarket" is stripped the same way since
+# several real station names are literally "X Supermarket".
+_STRIP_WORDS = re.compile(r",?\s*\b(?:Newry|Supermarket)\b", re.IGNORECASE)
+
+
+def _clean_name(text):
+    return re.sub(r"\s+", " ", _STRIP_WORDS.sub("", text)).strip(" ,")
 
 # Same coordinate pair already used for the (unrelated, externally
 # managed) Weather sidebar widget -- see README's "Subreddit sidebar"
@@ -102,6 +114,7 @@ def build_fuel_price_markdown():
             continue
         price, station, town, _age_days = result
         location = f"{station}, {town}" if town else station
+        location = _clean_name(location) or station  # never show a blank location if cleaning strips everything
         lines.append(f"{label}: {price:.1f}p/L at {location}  ")
 
     if not lines:

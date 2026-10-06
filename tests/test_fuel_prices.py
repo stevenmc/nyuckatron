@@ -93,8 +93,8 @@ def test_build_fuel_price_markdown_includes_both_fuels(monkeypatch):
     markdown = fuel_prices.build_fuel_price_markdown()
 
     assert "**Cheapest Fuel (Newry area)**" in markdown
-    assert "Petrol: 163.9p/L at Fiveways Supermarket, Newry" in markdown
-    assert "Diesel: 189.9p/L at Go Cloughoge, Newry" in markdown
+    assert "Petrol: 163.9p/L at Fiveways" in markdown  # "Supermarket, Newry" stripped -- see its own test
+    assert "Diesel: 189.9p/L at Go Cloughoge" in markdown
 
 
 def test_build_fuel_price_markdown_omits_a_fuel_with_no_fresh_price(monkeypatch):
@@ -113,3 +113,37 @@ def test_build_fuel_price_markdown_returns_empty_string_when_neither_fuel_availa
     monkeypatch.setattr(fuel_prices, "fetch_cheapest_fuel_price", lambda fuel_code: None)
 
     assert fuel_prices.build_fuel_price_markdown() == ""
+
+
+# --- display cleanup: "Newry" and "Supermarket" always stripped ----------
+
+def test_clean_name_strips_newry_and_the_comma_before_it():
+    assert fuel_prices._clean_name("Go Cloughoge, Newry") == "Go Cloughoge"
+
+
+def test_clean_name_strips_newry_even_without_a_preceding_comma():
+    assert fuel_prices._clean_name("Newry Filling Station") == "Filling Station"
+
+
+def test_clean_name_strips_supermarket():
+    assert fuel_prices._clean_name("Fiveways Supermarket") == "Fiveways"
+
+
+def test_clean_name_strips_both_together():
+    assert fuel_prices._clean_name("Fiveways Supermarket, Newry") == "Fiveways"
+
+
+def test_clean_name_is_case_insensitive():
+    assert fuel_prices._clean_name("fiveways supermarket, newry") == "fiveways"
+
+
+def test_build_fuel_price_markdown_strips_newry_and_supermarket_from_the_location(monkeypatch):
+    monkeypatch.setattr(
+        fuel_prices, "fetch_cheapest_fuel_price",
+        lambda fuel_code: (163.9, "Fiveways Supermarket", "Newry", 0.1) if fuel_code == "E10" else None,
+    )
+
+    markdown = fuel_prices.build_fuel_price_markdown()
+    petrol_line = next(line for line in markdown.split("\n") if line.startswith("Petrol"))
+
+    assert petrol_line.strip() == "Petrol: 163.9p/L at Fiveways"

@@ -130,3 +130,36 @@ def test_build_heating_oil_markdown_returns_empty_string_when_nothing_fetched(mo
     monkeypatch.setattr(heating_oil.requests, "get", MagicMock(return_value=_mock_response("<html></html>")))
 
     assert heating_oil.build_heating_oil_markdown() == ""
+
+
+# --- display cleanup: "Newry" and "Supermarket" always stripped ----------
+
+def test_clean_name_strips_newry_and_the_comma_before_it():
+    assert heating_oil._clean_name("Alfa Oils, Newry") == "Alfa Oils"
+
+
+def test_clean_name_strips_supermarket():
+    assert heating_oil._clean_name("Newry Co-op Supermarket Fuels") == "Co-op Fuels"
+
+
+def test_build_heating_oil_markdown_strips_newry_and_supermarket_from_supplier_names(monkeypatch):
+    page = _page(panel_500_articles=[_article(1, "Newry Supermarket Oils", 525)])
+    monkeypatch.setattr(heating_oil.requests, "get", MagicMock(return_value=_mock_response(page)))
+
+    markdown = heating_oil.build_heating_oil_markdown()
+    supplier_line = next(line for line in markdown.split("\n") if line.startswith("1."))
+
+    assert supplier_line.strip() == "1. Oils — £525.00"
+
+
+def test_fetch_top_heating_oil_suppliers_unescapes_html_entities_in_names(monkeypatch):
+    # Found while testing the Newry/Supermarket stripping above: the name
+    # is pulled straight from the page's raw HTML with no unescaping, so
+    # a supplier like "P&amp;J Fuels" was rendering literally as
+    # "P&amp;J Fuels" instead of "P&J Fuels".
+    page = _page(panel_500_articles=[_article(1, "P&amp;J Fuels", 525)])
+    monkeypatch.setattr(heating_oil.requests, "get", MagicMock(return_value=_mock_response(page)))
+
+    suppliers = heating_oil.fetch_top_heating_oil_suppliers()
+
+    assert suppliers[0][0] == "P&J Fuels"
