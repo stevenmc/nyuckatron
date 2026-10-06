@@ -19,17 +19,25 @@ def test_build_events_widget_markdown_includes_title_as_link_text_and_link_as_ta
     assert "[My Event](https://www.newry.ie/events/42)" in markdown
 
 
-def test_build_events_widget_markdown_includes_date_and_venue():
+def test_build_events_widget_markdown_includes_date_and_venue_on_separate_lines():
     markdown = events_widget.build_events_widget_markdown(
         [_event(start=datetime(2026, 10, 11, 19, 0), venue="Newry Town Hall")]
     )
     assert "Sun 11 Oct, 7:00 pm" in markdown
     assert "Newry Town Hall" in markdown
+    lines = markdown.split("\n")
+    date_line = next(line for line in lines if "Sun 11 Oct" in line)
+    venue_line = next(line for line in lines if "Newry Town Hall" in line)
+    assert date_line != venue_line  # own line, not joined onto the date line
 
 
-def test_build_events_widget_markdown_omits_venue_when_none():
+def test_build_events_widget_markdown_omits_venue_line_when_none():
     markdown = events_widget.build_events_widget_markdown([_event(venue=None)])
-    assert "·" not in markdown
+    # No dangling empty line (or stray separator) where the venue line
+    # would otherwise be -- the event's lines run straight from the date
+    # line into the blank line before the next event.
+    lines = [line for line in markdown.split("\n") if line.strip()]
+    assert len(lines) == 2  # just the title line and the date line
 
 
 def test_build_events_widget_markdown_shows_end_time_range_when_present():
@@ -87,7 +95,7 @@ def test_build_events_widget_markdown_uses_hard_line_breaks():
     # A single newline inside one Markdown list item is a soft break that
     # most renderers (Reddit's included) collapse back into one run-on
     # line -- each content line needs a trailing-double-space hard break
-    # to actually render as two separate lines. Two events, so the first
+    # to actually render as separate lines. Two events, so the first
     # event's lines aren't the very end of the whole string (where a
     # trailing hard break wouldn't matter and gets stripped anyway).
     markdown = events_widget.build_events_widget_markdown(
@@ -98,7 +106,8 @@ def test_build_events_widget_markdown_uses_hard_line_breaks():
     )
     lines = markdown.split("\n")
     assert lines[0].endswith("  ")  # the linked-title line
-    assert lines[1].endswith("  ")  # the date/venue line
+    assert lines[1].endswith("  ")  # the date line
+    assert lines[2].endswith("  ")  # the venue line
 
 
 def test_build_events_widget_markdown_omits_the_time_for_a_date_only_event():
@@ -109,7 +118,10 @@ def test_build_events_widget_markdown_omits_the_time_for_a_date_only_event():
         [_event(title="Date Only Event", start=datetime(2026, 10, 12, 0, 0), venue="A Venue")]
     )
     assert "12:00 am" not in markdown.lower()
-    assert "Mon 12 Oct · A Venue" in markdown
+    lines = markdown.split("\n")
+    date_line = next(line for line in lines if "Mon 12 Oct" in line)
+    assert date_line.strip() == "Mon 12 Oct"  # no trailing time, and no venue joined on
+    assert "A Venue" in markdown
 
 
 # --- sync_events_widget (mocked praw) -------------------------------------

@@ -45,13 +45,14 @@ def build_events_widget_markdown(upcoming_events):
     empty list, rather than empty text, so the widget never renders
     blank.
 
-    Each event is two lines: the linked title, then its date/time/venue.
-    Both end in a Markdown hard line break (two trailing spaces) rather
-    than relying on a plain newline -- a single newline inside one list
-    item is a soft break that most Markdown renderers (Reddit's included)
-    collapse back into one run-on line, which is exactly what made the
-    first version of this widget render as one unbroken line per event
-    instead of two."""
+    Each event is up to three lines: the linked title, its date/time, then
+    its venue (omitted entirely if there isn't one -- no dangling empty
+    line). All end in a Markdown hard line break (two trailing spaces)
+    rather than relying on a plain newline -- a single newline inside one
+    list item is a soft break that most Markdown renderers (Reddit's
+    included) collapse back into one run-on line, which is exactly what
+    made the first version of this widget render as one unbroken line per
+    event instead of separate ones."""
     if not upcoming_events:
         return _NO_EVENTS_TEXT
 
@@ -65,11 +66,11 @@ def build_events_widget_markdown(upcoming_events):
             detail += f", {_format_time(start)}"
             if end and end != start:
                 detail += " – " + _format_time(end)
-        if venue:
-            detail += " · " + venue
 
         lines.append(f"- {heading}  ")
         lines.append(f"  {detail}  ")
+        if venue:
+            lines.append(f"  {venue}  ")
         lines.append("")
 
     return "\n".join(lines).strip()
