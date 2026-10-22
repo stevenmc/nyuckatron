@@ -372,6 +372,17 @@ def is_allowed_domain(url, allowed_domains, allowed_suffixes=(), place_names=())
 # the separators different outlets/CMSs use for "<headline> - Outlet".
 _VENDOR_SEPARATOR = re.compile(r"\s[-–—|]\s")
 
+# Some sports-fixture titles are themselves shaped "YYYY-MM-DD - Team A v
+# Team B | Outlet" (confirmed live, e.g. "2026-10-20 - Carrick Rangers v
+# Newry City | NI Football..."). Cutting at the *last* separator normally
+# handles this fine on its own (it lands on " | ", keeping the whole
+# "date - fixture" headline) -- but bot.py's fetch_entries strips a known
+# entry.source.title off the end *before* this function ever sees the
+# title, which can consume the " | Outlet" tail first and leave only the
+# "date - fixture" dash behind for this function to (wrongly) treat as
+# the vendor separator, producing a bare date as the "headline".
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 def strip_vendor_suffix(title):
     """Generic fallback for '<headline> - Outlet' / '<headline> | Outlet'
@@ -380,8 +391,19 @@ def strip_vendor_suffix(title):
     News, which is more precise when available). Cuts at the *last*
     separator found, regardless of which kind -- cutting at the first
     instead would mangle any real headline that happens to contain a
-    ' - ' of its own before the vendor suffix."""
+    ' - ' of its own before the vendor suffix.
+
+    If that leaves nothing but a bare date (see _DATE_ONLY's comment for
+    why that happens), falls back to cutting at the first pipe instead --
+    keeping the real headline, date prefix included, and only dropping a
+    genuine trailing '| Outlet' if the original title still had one."""
     matches = list(_VENDOR_SEPARATOR.finditer(title))
     if not matches:
         return title.strip()
-    return title[: matches[-1].start()].strip()
+
+    stripped = title[: matches[-1].start()].strip()
+    if _DATE_ONLY.match(stripped):
+        pipe = title.find("|")
+        if pipe != -1:
+            return title[:pipe].strip()
+    return stripped
