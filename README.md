@@ -62,7 +62,9 @@ by cron -- no server, nothing kept running between runs.
   available and falling back to a generic strip otherwise.
 - Strips Eventbrite's tracking query string from event links.
 - Drops anything matching `EXCLUDE_KEYWORDS` in config.py (death notices,
-  advertorials, property-for-sale listings).
+  advertorials, property-for-sale listings, and fixed phrases that are
+  ambiguous with somewhere else entirely -- e.g. "Newry Downs," a
+  locality in Queensland, Australia).
 - Drops anything whose *resolved* URL's domain is in `EXCLUDE_DOMAINS`
   (checked after Google News link decoding, so a paywalled outlet hiding
   behind a `news.google.com` wrapper link still gets caught). Currently

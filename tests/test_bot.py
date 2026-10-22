@@ -84,6 +84,15 @@ def test_is_excluded_leaves_ordinary_news_alone():
     )
 
 
+def test_is_excluded_matches_newry_downs():
+    # "Newry Downs" is a locality in Queensland, Australia, not anything
+    # to do with Newry, Co. Down -- the same class of ambiguous-place-name
+    # problem CATCHMENT_PLACES's "Hilltown" removal exists for, confirmed
+    # by the user 2026-10-22.
+    assert bot.is_excluded("Flooding reported near Newry Downs", "")
+    assert bot.is_excluded("Local news", "A story set around Newry Downs station")
+
+
 def _fake_parsed(entries, bozo_exception=None):
     return SimpleNamespace(entries=entries, bozo_exception=bozo_exception)
 

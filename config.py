@@ -353,6 +353,12 @@ EXCLUDE_KEYWORDS = [
     "properties for sale",
     "bedroom house for sale",
     "bedroom home for sale",
+    # ambiguous place names that aren't Newry, Co. Down -- same class of
+    # problem "Hilltown" was removed from CATCHMENT_PLACES for (see that
+    # constant's own comment), but this one's a fixed phrase rather than
+    # a bare catchment-place word, so it belongs here as an exclusion
+    # instead of needing its own search-term removal.
+    "newry downs",  # a locality in Queensland, Australia -- confirmed by the user 2026-10-22
 ]
 
 # An entry is dropped if its (resolved) URL's domain matches one of these.
