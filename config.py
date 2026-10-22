@@ -434,5 +434,17 @@ MAX_NEWS_AGE_DAYS = 2
 MAX_POSTS_PER_RUN = 5
 SECONDS_BETWEEN_SUBMISSIONS = 20
 
+# At most `limit` new posts per rolling 24h whose TITLE contains `keyword`
+# (case-insensitive, checked against state.db's posting history) --
+# distinct from the fuzzy-duplicate-story check above, which only catches
+# near-identical headlines about the same story. This throttles a topic
+# that keeps generating genuinely different articles (not duplicates) in
+# a way that would otherwise flood the subreddit. Keys lowercase; doesn't
+# affect commenting an alternate source on an already-live post, only
+# whether a new front-page submission is made.
+KEYWORD_DAILY_LIMITS = {
+    "crossmaglen": 1,  # added 2026-10-22 at the user's request
+}
+
 STATE_DB_PATH = "state.db"
 LOG_PATH = "bot.log"

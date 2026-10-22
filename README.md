@@ -80,7 +80,12 @@ by cron -- no server, nothing kept running between runs.
   `moderation.approve_own_spam_posts`. Never touches other authors' posts.
 - Posts what's left as link posts, applies flair based on domain/keyword
   matching, capped at `MAX_POSTS_PER_RUN` per run with a delay between
-  submissions.
+  submissions. `config.KEYWORD_DAILY_LIMITS` caps how many new posts per
+  rolling 24h can have a given word in the title (e.g. at most 1
+  "Crossmaglen" story a day) -- for a topic that keeps generating
+  genuinely different (not duplicate) articles fast enough to flood the
+  subreddit on its own. Doesn't affect commenting an alternate source on
+  an already-live post, only whether a new submission is made.
 - Separately, `bot.py run_events` posts newry.ie's own events feed to
   Reddit (Events flair forced), and `bot.py calendar` (or `make
   run-events` / `./run.sh run-events`) syncs those same events to a

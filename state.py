@@ -36,6 +36,21 @@ def recent_titles(conn, window_days):
     return [r[0] for r in rows]
 
 
+def count_recent_titles_containing(conn, substring, window_hours=24):
+    """How many posted rows have `substring` (case-insensitive) in their
+    raw title, within the last `window_hours` -- used for per-keyword
+    daily caps (config.KEYWORD_DAILY_LIMITS). Checked against the raw
+    `title` column, not `normalized_title`: a catchment place name like
+    "Crossmaglen" is itself stripped out during normalization (see
+    textutil._STOPWORDS), so it would never match there."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM posted WHERE posted_at >= ? AND title LIKE ? COLLATE NOCASE",
+        (cutoff, f"%{substring}%"),
+    ).fetchone()
+    return row[0]
+
+
 def record_posted(conn, url, title, normalized_title):
     conn.execute(
         "INSERT OR IGNORE INTO posted (url, title, normalized_title, posted_at) VALUES (?, ?, ?, ?)",

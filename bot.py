@@ -284,6 +284,12 @@ def main():
     # Stopgap for Tier 3 (browser resolve) being unavailable on the current
     # EC2 box -- see config.NEWRY_IE_LINK_MATCH_THRESHOLD.
     newry_ie_candidates = fetch_newry_ie_candidates()
+    # Seeded from state.db, then kept current as this run posts -- see
+    # config.KEYWORD_DAILY_LIMITS.
+    keyword_counts = {
+        keyword: state.count_recent_titles_containing(conn, keyword)
+        for keyword in config.KEYWORD_DAILY_LIMITS
+    }
 
     posts_made = 0
     seen_urls_this_run = set()
@@ -444,6 +450,26 @@ def main():
                 time.sleep(config.SECONDS_BETWEEN_SUBMISSIONS)
                 continue
 
+            # A genuinely different story can still flood the subreddit if
+            # one topic just keeps generating articles -- this is a new
+            # front-page submission at this point (the dup_of/comment path
+            # above already continued), so it's exactly what
+            # KEYWORD_DAILY_LIMITS exists to throttle.
+            title_lower = title.lower()
+            capped_keyword = next(
+                (
+                    keyword for keyword, limit in config.KEYWORD_DAILY_LIMITS.items()
+                    if keyword in title_lower and keyword_counts[keyword] >= limit
+                ),
+                None,
+            )
+            if capped_keyword:
+                log.info(
+                    "Skipping (daily limit reached for '%s') [%s] %s",
+                    capped_keyword, source_name, title,
+                )
+                continue
+
             try:
                 moderation.submit_post(reddit, config.SUBREDDIT, resolved_url, title[:300])
                 log.info("Posted [%s] %s -> %s", source_name, title, resolved_url)
@@ -457,6 +483,9 @@ def main():
             live_titles.add(title)
             live_urls.add(resolved_url)
             posts_made += 1
+            for keyword in config.KEYWORD_DAILY_LIMITS:
+                if keyword in title_lower:
+                    keyword_counts[keyword] += 1
 
             if posts_made < config.MAX_POSTS_PER_RUN:
                 time.sleep(config.SECONDS_BETWEEN_SUBMISSIONS)

@@ -68,3 +68,30 @@ def test_record_posted_is_idempotent_on_url(conn):
     rows = conn.execute("SELECT title FROM posted WHERE url = ?", ("https://example.com/a",)).fetchall()
     assert len(rows) == 1
     assert rows[0][0] == "First Title"
+
+
+# --- count_recent_titles_containing (config.KEYWORD_DAILY_LIMITS) --------
+
+def test_count_recent_titles_containing_counts_case_insensitively(conn):
+    state.record_posted(conn, "https://example.com/a", "Crossmaglen win again", "x")
+    state.record_posted(conn, "https://example.com/b", "CROSSMAGLEN in the final", "y")
+    state.record_posted(conn, "https://example.com/c", "Unrelated story", "z")
+
+    assert state.count_recent_titles_containing(conn, "crossmaglen") == 2
+
+
+def test_count_recent_titles_containing_excludes_entries_outside_the_window(conn):
+    old_time = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    conn.execute(
+        "INSERT INTO posted (url, title, normalized_title, posted_at) VALUES (?, ?, ?, ?)",
+        ("https://example.com/old", "Crossmaglen story", "x", old_time),
+    )
+    conn.commit()
+
+    assert state.count_recent_titles_containing(conn, "crossmaglen", window_hours=24) == 0
+
+
+def test_count_recent_titles_containing_returns_zero_when_nothing_matches(conn):
+    state.record_posted(conn, "https://example.com/a", "Unrelated story", "x")
+
+    assert state.count_recent_titles_containing(conn, "crossmaglen") == 0
