@@ -153,7 +153,13 @@ def fetch_entries():
             source = getattr(entry, "source", None)
             source_title = getattr(source, "title", None) if source else None
             if source_title and title.endswith(source_title):
-                title = title[: -len(source_title)].rstrip(" -–—").strip()
+                # rstrip charset includes "|" alongside the dash variants --
+                # confirmed live, a title separated from its outlet by " | "
+                # (rather than a dash) otherwise left a bare trailing "|"
+                # here, which strip_vendor_suffix below has no way to clean
+                # up itself (it only recognises a separator with whitespace
+                # on *both* sides, and there's nothing after this one).
+                title = title[: -len(source_title)].rstrip(" -–—|").strip()
             title = linkclean.strip_vendor_suffix(title)
 
             yield title, link, summary, feed["name"]

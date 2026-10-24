@@ -373,15 +373,18 @@ def is_allowed_domain(url, allowed_domains, allowed_suffixes=(), place_names=())
 _VENDOR_SEPARATOR = re.compile(r"\s[-–—|]\s")
 
 # Some sports-fixture titles are themselves shaped "YYYY-MM-DD - Team A v
-# Team B | Outlet" (confirmed live, e.g. "2026-10-20 - Carrick Rangers v
-# Newry City | NI Football..."). Cutting at the *last* separator normally
-# handles this fine on its own (it lands on " | ", keeping the whole
-# "date - fixture" headline) -- but bot.py's fetch_entries strips a known
-# entry.source.title off the end *before* this function ever sees the
-# title, which can consume the " | Outlet" tail first and leave only the
-# "date - fixture" dash behind for this function to (wrongly) treat as
-# the vendor separator, producing a bare date as the "headline".
-_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Team B <sep> Outlet", and the outlet separator isn't always a pipe --
+# confirmed live with both "2026-10-20 - Carrick Rangers v Newry City |
+# NI Football Pitch" (pipe) and "2026-10-23 - Newry City v Newington -
+# NI Football League" (a second dash). The separator right after a
+# leading date is the fixture's own "date - teams" dash, never the
+# vendor boundary -- excluded from consideration below so cutting at
+# "the last separator" can never regress to it, regardless of which
+# character (or how many of them) the real vendor separator happens to
+# be. This also covers bot.py's fetch_entries pre-stripping a known
+# entry.source.title off the end before this function ever runs, which
+# can leave the date-prefix dash as the only separator left to find.
+_DATE_PREFIX_SEPARATOR = re.compile(r"^\d{4}-\d{2}-\d{2}\s[-–—|]\s")
 
 
 def strip_vendor_suffix(title):
@@ -393,17 +396,15 @@ def strip_vendor_suffix(title):
     instead would mangle any real headline that happens to contain a
     ' - ' of its own before the vendor suffix.
 
-    If that leaves nothing but a bare date (see _DATE_ONLY's comment for
-    why that happens), falls back to cutting at the first pipe instead --
-    keeping the real headline, date prefix included, and only dropping a
-    genuine trailing '| Outlet' if the original title still had one."""
-    matches = list(_VENDOR_SEPARATOR.finditer(title))
+    A separator immediately after a leading "YYYY-MM-DD" date is excluded
+    from that search entirely (see _DATE_PREFIX_SEPARATOR's comment) -- if
+    nothing else qualifies, the title is returned as-is rather than cut
+    down to just the date."""
+    date_prefix = _DATE_PREFIX_SEPARATOR.match(title)
+    matches = [
+        m for m in _VENDOR_SEPARATOR.finditer(title)
+        if date_prefix is None or m.start() >= date_prefix.end()
+    ]
     if not matches:
         return title.strip()
-
-    stripped = title[: matches[-1].start()].strip()
-    if _DATE_ONLY.match(stripped):
-        pipe = title.find("|")
-        if pipe != -1:
-            return title[:pipe].strip()
-    return stripped
+    return title[: matches[-1].start()].strip()

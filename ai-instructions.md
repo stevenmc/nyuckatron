@@ -726,3 +726,44 @@ line was pure noise once actually seen rendered; several real station
 names are also literally "X Supermarket". The comma immediately before
 "Newry" is stripped along with the word itself so a removed word never
 leaves a dangling comma behind.
+
+## Sports-fixture titles collapsing to a bare date (`linkclean.strip_vendor_suffix`, `bot.fetch_entries`)
+
+**Confirmed live twice, about a week apart (2026-10-22, then again
+2026-10-24 with a different separator character), both times posting
+as literally just "2026-10-20" / "2026-10-23" instead of the real
+fixture headline.** Root cause: some sports-fixture titles are
+themselves shaped `"YYYY-MM-DD - Team A v Team B <sep> Outlet"` --
+`<sep>` isn't consistently a pipe (`"2026-10-20 - Carrick Rangers v
+Newry City | NI Football Pitch"`) or a dash (`"2026-10-23 - Newry City
+v Newington - NI Football League"`), it varies by source. `bot.
+fetch_entries` strips a known `entry.source.title` off the end *before*
+`strip_vendor_suffix` ever sees the title, which consumes the real
+vendor separator (and the outlet name) first -- leaving only the
+fixture's own leading `"date - teams"` dash for `strip_vendor_suffix`'s
+"cut at the last separator" logic to find, and it wrongly treated that
+as the vendor boundary.
+
+**The first fix (2026-10-22) was too narrow and had to be redone**:
+it special-cased "if the result is a bare date, fall back to cutting at
+the first pipe" -- which fixed the pipe-separated case but did nothing
+for the dash-separated one that turned up two days later, since there
+was no pipe anywhere left to fall back to by that point. The real,
+general fix (2026-10-24): exclude a separator immediately following a
+leading `"YYYY-MM-DD"` from `strip_vendor_suffix`'s candidate list
+entirely (`_DATE_PREFIX_SEPARATOR`) -- it is structurally never the
+vendor boundary, regardless of what character the *real* one turns out
+to be, or whether it's even still present in the string by the time
+this function runs. **If a future case turns up where this still
+regresses to a bare date, the fix almost certainly needs to generalize
+further, not add another special-cased fallback character** -- that's
+exactly the mistake the first attempt made.
+
+**A smaller, related bug fixed the same day**: `fetch_entries`'s own
+`entry.source.title` pre-strip only trimmed trailing `" -–—"` characters
+after slicing off the outlet name, not `"|"` -- so a pipe-separated
+title was left with a dangling bare `"|"` at the end (e.g. `"...Newry
+City |"`), which `strip_vendor_suffix` then had no way to clean up
+itself (it only recognises a separator with whitespace on *both*
+sides, and there's nothing after a trailing one). Fixed by adding `"|"`
+to that rstrip charset.

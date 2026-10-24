@@ -311,6 +311,42 @@ def test_fetch_entries_strips_source_title_suffix(monkeypatch):
     assert title == "New bins scheme starts Monday"
 
 
+def test_fetch_entries_keeps_the_date_prefix_on_a_sports_fixture_title(monkeypatch):
+    # Regression test for two real, weekly-recurring incidents
+    # (2026-10-22, 2026-10-24): a sports-fixture title shaped
+    # "YYYY-MM-DD - Team A v Team B <sep> Outlet" was posting as just
+    # the bare date -- entry.source.title's own pre-strip consumed the
+    # outlet name (and, when the separator was a pipe, left a dangling
+    # "|" this function's rstrip didn't clean up either), leaving only
+    # the date's own dash for linkclean.strip_vendor_suffix to find,
+    # which it then wrongly treated as the vendor boundary.
+    monkeypatch.setattr(
+        config,
+        "FEEDS",
+        [{"name": "Google News - Newry area", "url": "http://example.com/rss", "keyword_filter": None}],
+    )
+    entries = [
+        SimpleNamespace(
+            title="2026-10-20 - Carrick Rangers v Newry City | NI Football Pitch",
+            link="http://example.com/1", summary="",
+            source=SimpleNamespace(title="NI Football Pitch"),
+        ),
+        SimpleNamespace(
+            title="2026-10-23 - Newry City v Newington - NI Football League",
+            link="http://example.com/2", summary="",
+            source=SimpleNamespace(title="NI Football League"),
+        ),
+    ]
+    monkeypatch.setattr(bot.feedparser, "parse", lambda url: _fake_parsed(entries))
+
+    results = [title for title, *_ in bot.fetch_entries()]
+
+    assert results == [
+        "2026-10-20 - Carrick Rangers v Newry City",
+        "2026-10-23 - Newry City v Newington",
+    ]
+
+
 def test_fetch_entries_falls_back_to_generic_vendor_stripper_without_source(monkeypatch):
     monkeypatch.setattr(
         config,

@@ -232,40 +232,46 @@ def test_strip_vendor_suffix_em_dash_separator():
     assert linkclean.strip_vendor_suffix("Newry wins football — Irish News") == "Newry wins football"
 
 
-# --- date-only fallback (sports-fixture titles like "YYYY-MM-DD - Team A v Team B | Outlet") ---
+# --- date-prefix separator exclusion (sports-fixture titles like "YYYY-MM-DD - Team A v Team B <sep> Outlet") ---
 
-def test_strip_vendor_suffix_falls_back_to_the_pipe_when_last_dash_leaves_only_a_date():
+def test_strip_vendor_suffix_keeps_the_fixture_when_outlet_separator_is_a_pipe():
     # Regression test for a real, weekly-recurring case (2026-10-22):
-    # cutting at the last separator (here, the dash) would otherwise
-    # leave nothing but the fixture's date prefix.
+    # cutting at the last separator without excluding the date-prefix one
+    # would otherwise leave nothing but the fixture's date prefix.
     title = "2026-10-20 - Carrick Rangers v Newry City | NI Football Pitch"
     assert linkclean.strip_vendor_suffix(title) == "2026-10-20 - Carrick Rangers v Newry City"
 
 
-def test_strip_vendor_suffix_falls_back_to_the_pipe_even_when_the_pipe_is_left_dangling():
-    # The exact shape bot.py's fetch_entries actually hands this function
-    # in the real incident: its own entry.source.title pre-strip already
-    # consumed everything after the outlet name, including the text that
-    # followed " | ", leaving a bare trailing "|" with nothing after it
-    # (so it no longer matches _VENDOR_SEPARATOR, which requires
-    # whitespace on both sides) -- only the date's dash is left for this
-    # function to find, which is exactly what used to produce "2026-10-20"
-    # alone.
-    title = "2026-10-20 - Carrick Rangers v Newry City |"
-    assert linkclean.strip_vendor_suffix(title) == "2026-10-20 - Carrick Rangers v Newry City"
+def test_strip_vendor_suffix_keeps_the_fixture_when_outlet_separator_is_also_a_dash():
+    # Regression test for a second real case (2026-10-24) confirming the
+    # fix generalises: the outlet separator isn't always a pipe -- here
+    # it's a second dash, so there's no distinguishing character to spot,
+    # only position (right after the leading date vs. further along).
+    title = "2026-10-23 - Newry City v Newington - NI Football League"
+    assert linkclean.strip_vendor_suffix(title) == "2026-10-23 - Newry City v Newington"
 
 
-def test_strip_vendor_suffix_date_only_fallback_requires_a_pipe_to_fall_back_to():
-    # No pipe anywhere to recover a better headline from -- stays as the
-    # bare date rather than guessing. Not the happy path, just not worse
-    # than before this fix.
-    assert linkclean.strip_vendor_suffix("2026-10-20 - Something") == "2026-10-20"
+def test_strip_vendor_suffix_keeps_the_fixture_even_when_the_outlet_is_already_gone():
+    # The exact shape bot.py's fetch_entries hands this function after
+    # its own entry.source.title pre-strip already removed the outlet
+    # name -- only the date's own dash is left for this function to see,
+    # which is exactly what used to get wrongly treated as the vendor
+    # separator.
+    assert linkclean.strip_vendor_suffix("2026-10-20 - Carrick Rangers v Newry City") == "2026-10-20 - Carrick Rangers v Newry City"
+    assert linkclean.strip_vendor_suffix("2026-10-23 - Newry City v Newington") == "2026-10-23 - Newry City v Newington"
 
 
-def test_strip_vendor_suffix_does_not_trigger_the_date_only_fallback_for_a_real_headline():
-    # Sanity check that the fallback only engages for the exact bare-date
-    # degenerate case, not for ordinary headlines that happen to end up
-    # looking nothing like a date.
+def test_strip_vendor_suffix_leaves_a_lone_date_prefix_dash_alone_with_nothing_else_to_cut():
+    # No real vendor suffix anywhere in this one -- the date-prefix dash
+    # is excluded from consideration, and nothing else qualifies, so the
+    # title comes back whole rather than being cut down to just the date.
+    assert linkclean.strip_vendor_suffix("2026-10-20 - Something") == "2026-10-20 - Something"
+
+
+def test_strip_vendor_suffix_does_not_exclude_separators_that_are_not_a_date_prefix():
+    # Sanity check that the exclusion only applies to a separator right
+    # after a leading "YYYY-MM-DD" -- an ordinary headline with no date
+    # prefix is cut at its last separator exactly as before.
     assert linkclean.strip_vendor_suffix("New bins - Newry Times") == "New bins"
 
 
