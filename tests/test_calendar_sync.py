@@ -221,3 +221,89 @@ def test_list_upcoming_event_summaries_fails_open_on_request_exception(monkeypat
     monkeypatch.setattr(calendar_sync.requests, "get", MagicMock(side_effect=requests.ConnectionError("down")))
 
     assert calendar_sync.list_upcoming_event_summaries() == []  # doesn't raise
+
+
+# --- occurrence_key (distinct occurrences sharing one link) ----------------
+
+def test_sync_event_uses_occurrence_key_instead_of_link_for_the_calendar_id_when_given(monkeypatch):
+    # Regression test for a real incident (2026-11-09): the What's On
+    # guide listed "Santa at the Castle" three times under one shared
+    # link, with three different dates -- event_id_for(link) alone would
+    # hash all three to the same ID and silently overwrite each other
+    # down to a single surviving date.
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    mock_put = MagicMock(return_value=_mock_response(200))
+    monkeypatch.setattr(calendar_sync.requests, "put", mock_put)
+
+    shared_link = "https://example.com/santa"
+    calendar_sync.sync_event(
+        "Santa at the Castle", shared_link, datetime(2026, 12, 6, 0, 0), None, "Narrow Water Castle",
+        occurrence_key=f"{shared_link}|2026-12-06",
+    )
+    id_a = mock_put.call_args[0][0].rsplit("/", 1)[1]
+
+    calendar_sync.sync_event(
+        "Santa at the Castle", shared_link, datetime(2026, 12, 9, 0, 0), None, "Narrow Water Castle",
+        occurrence_key=f"{shared_link}|2026-12-09",
+    )
+    id_b = mock_put.call_args[0][0].rsplit("/", 1)[1]
+
+    assert id_a != id_b
+
+
+def test_sync_event_falls_back_to_the_bare_link_when_occurrence_key_is_not_given(monkeypatch):
+    # newry.ie's own calls never pass occurrence_key -- its event IDs
+    # must stay exactly as they were before this feature existed, or
+    # every already-synced newry.ie event would be orphaned and
+    # duplicated on the next run.
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    mock_put = MagicMock(return_value=_mock_response(200))
+    monkeypatch.setattr(calendar_sync.requests, "put", mock_put)
+
+    link = "https://www.newry.ie/events/2392-newry-artisan-and-craft-market-2"
+    calendar_sync.sync_event("Event", link, datetime(2026, 12, 6, 0, 0), None, "Venue")
+
+    used_id = mock_put.call_args[0][0].rsplit("/", 1)[1]
+    assert used_id == calendar_sync.event_id_for(link)
+
+
+# --- source.url must be a real http(s) link ---------------------------------
+
+def test_sync_event_omits_source_field_for_a_non_http_link(monkeypatch):
+    # Regression test for a real incident (2026-11-09): the What's On
+    # guide has events with no real web page, just a phone contact
+    # ("tel:+44...") -- the Calendar API 400s with "Invalid source url"
+    # if that's passed as source.url. The real contact detail still
+    # reaches the reader via the "More info: {link}" description line.
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    mock_put = MagicMock(return_value=_mock_response(200))
+    monkeypatch.setattr(calendar_sync.requests, "put", mock_put)
+
+    calendar_sync.sync_event("Event", "tel:+447746148998", datetime(2026, 12, 5, 13, 0), None, "Venue")
+
+    body = mock_put.call_args.kwargs["json"]
+    assert "source" not in body
+    assert "tel:+447746148998" in body["description"]
+
+
+def test_sync_event_includes_source_field_for_a_real_http_link(monkeypatch):
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    mock_put = MagicMock(return_value=_mock_response(200))
+    monkeypatch.setattr(calendar_sync.requests, "put", mock_put)
+
+    calendar_sync.sync_event("Event", "https://example.com/a", datetime(2026, 12, 5, 13, 0), None, "Venue")
+
+    body = mock_put.call_args.kwargs["json"]
+    assert body["source"] == {"title": "newry.ie", "url": "https://example.com/a"}

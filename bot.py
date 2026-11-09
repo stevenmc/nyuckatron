@@ -660,8 +660,16 @@ def sync_calendar():
             log.info("Skipping guide event (similar to an existing calendar entry): %s", title)
             continue
 
+        # occurrence_key, not the bare link: confirmed live, this source
+        # sometimes lists several distinct dates for one real recurring
+        # event under one shared link (e.g. "Santa at the Castle" -- three
+        # different December dates, one page) -- without this, they'd all
+        # hash to the same Calendar ID and silently overwrite each other
+        # down to a single surviving date. See calendar_sync.sync_event's
+        # own docstring for why newry.ie's calls don't do this too.
         if calendar_sync.sync_event(
-            title, link, start, end, venue, description=description, source_name="Newry What's On Guide"
+            title, link, start, end, venue, description=description, source_name="Newry What's On Guide",
+            occurrence_key=f"{link}|{start.strftime('%Y-%m-%d')}",
         ):
             synced += 1
             existing_events.append((title, start.strftime("%Y-%m-%d")))

@@ -72,23 +72,25 @@ def _access_token():
     return creds.token
 
 
-def event_id_for(link):
-    """Deterministic Google Calendar event ID derived from a newry.ie event
-    link, so re-syncing the same event always targets the same Calendar
-    entry (upsert) instead of creating a duplicate. Calendar event IDs are
-    restricted to lowercase base32hex characters (a-v, 0-9) and hyphens,
-    5-1024 characters -- hence hashing the link rather than reusing its
-    text directly, which contains characters that aren't allowed. The
-    prefix below must stick to that same a-v/0-9 charset too: "newryie"
-    itself contains 'w' and 'y', which the Calendar API rejects outright
-    (confirmed live -- every insert 400'd with "Invalid resource id
-    value." until this was caught), hence "nerie" rather than the more
-    obvious spelling."""
-    digest = hashlib.sha1(link.encode("utf-8")).hexdigest()
+def event_id_for(key):
+    """Deterministic Google Calendar event ID derived from `key` -- a
+    source's event link in the common case, or sync_event's
+    `occurrence_key` when that's given instead (see its own docstring)
+    -- so re-syncing the same event always targets the same Calendar
+    entry (upsert) instead of creating a duplicate. Calendar event IDs
+    are restricted to lowercase base32hex characters (a-v, 0-9) and
+    hyphens, 5-1024 characters -- hence hashing `key` rather than reusing
+    its text directly, which contains characters that aren't allowed.
+    The prefix below must stick to that same a-v/0-9 charset too:
+    "newryie" itself contains 'w' and 'y', which the Calendar API rejects
+    outright (confirmed live -- every insert 400'd with "Invalid resource
+    id value." until this was caught), hence "nerie" rather than the
+    more obvious spelling."""
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
     return "nerie" + digest[:24]
 
 
-def sync_event(title, link, start, end, venue, description="", source_name="newry.ie"):
+def sync_event(title, link, start, end, venue, description="", source_name="newry.ie", occurrence_key=None):
     """Upserts one event into the configured Google Calendar. Returns the
     event's Calendar `htmlLink` (a real, truthy URL string) on success, or
     a falsy value (None or False) otherwise (including when Calendar
@@ -104,7 +106,19 @@ def sync_event(title, link, start, end, venue, description="", source_name="newr
     `source_name` labels the Calendar event's `source.title` field --
     defaults to "newry.ie" since that was this function's only caller
     for a long time, but a second source (see newry_whats_on.py) passes
-    its own name so the Calendar entry doesn't misattribute itself."""
+    its own name so the Calendar entry doesn't misattribute itself.
+
+    `occurrence_key`, if given, is hashed into the event's Calendar ID
+    instead of the bare `link` -- needed when a source can list several
+    distinct occurrences under one shared link (confirmed live for the
+    What's On guide's "Santa at the Castle": three different December
+    dates, one link), which would otherwise all hash to the same ID and
+    silently overwrite each other down to a single survivor. Leave unset
+    for newry.ie's own calls, where each real occurrence already has its
+    own distinct link (see the "Dear Evan Hanson" incident in
+    ai-instructions.md) -- changing their event IDs now would orphan
+    every already-synced newry.ie event and create a fresh duplicate for
+    each one instead of updating it."""
     if not is_configured():
         global _warned_not_configured
         if not _warned_not_configured:
@@ -123,14 +137,20 @@ def sync_event(title, link, start, end, venue, description="", source_name="newr
         end = start + timedelta(hours=config.DEFAULT_EVENT_DURATION_HOURS)
 
     body = {
-        "id": event_id_for(link),
+        "id": event_id_for(occurrence_key or link),
         "summary": title,
         "location": venue or "",
         "description": (description + f"\n\nMore info: {link}").strip(),
         "start": {"dateTime": start.isoformat(), "timeZone": _TIMEZONE},
         "end": {"dateTime": end.isoformat(), "timeZone": _TIMEZONE},
-        "source": {"title": source_name, "url": link},
     }
+    # Calendar's API rejects a non-http(s) source.url outright (confirmed
+    # live: a "tel:+44..." link 400'd with "Invalid source url") -- the
+    # What's On guide has a handful of events with no real web page, just
+    # a phone contact. The real link still reaches the reader either way,
+    # via the "More info: {link}" line in the description above.
+    if link.startswith(("http://", "https://")):
+        body["source"] = {"title": source_name, "url": link}
 
     try:
         headers = {
