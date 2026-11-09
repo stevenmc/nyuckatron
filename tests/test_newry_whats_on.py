@@ -217,3 +217,14 @@ def test_find_similar_existing_event_false_when_start_is_none():
 
 def test_find_similar_existing_event_false_for_empty_existing_list():
     assert not newry_whats_on.find_similar_existing_event("Anything", datetime(2026, 11, 14), [])
+
+
+def test_find_similar_existing_event_ignores_a_coincidental_one_word_overlap():
+    # Confirmed live 2026-11-09: "Santa at the Castle" and "Santa's
+    # SuperShow -- Bellini's Newry" are unrelated events that happened to
+    # land on the same date and share only the word "santa" -- scores 0.5
+    # (SIMILARITY_THRESHOLD) but should not clear this check's stricter
+    # CALENDAR_CROSS_SOURCE_DEDUP_THRESHOLD.
+    existing = [("Santa's SuperShow — Bellini's Newry", "2026-12-06")]
+    start = datetime(2026, 12, 6)
+    assert not newry_whats_on.find_similar_existing_event("Santa at the Castle", start, existing)

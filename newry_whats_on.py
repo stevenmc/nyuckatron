@@ -177,13 +177,16 @@ def find_similar_existing_event(title, start, existing_events, threshold=None):
     -- the cross-source "is something similar already in the calendar"
     check the user asked for, distinct from event_id_for's exact-link
     upsert (which only catches a repeat from *this* source). Defaults to
-    config.SIMILARITY_THRESHOLD -- the same bar news/event dedup already
-    uses elsewhere in this project, not a new, separately-tuned number.
+    config.CALENDAR_CROSS_SOURCE_DEDUP_THRESHOLD, deliberately stricter
+    than the SIMILARITY_THRESHOLD news/Reddit-event dedup uses elsewhere
+    in this project -- see that constant's own comment for why a false
+    positive here (a real event silently never added to the calendar)
+    is costlier than the false positives SIMILARITY_THRESHOLD tolerates.
     False if `start` is None (nothing to compare dates against)."""
     if start is None:
         return False
     if threshold is None:
-        threshold = config.SIMILARITY_THRESHOLD
+        threshold = config.CALENDAR_CROSS_SOURCE_DEDUP_THRESHOLD
     date_str = start.strftime("%Y-%m-%d")
     normalized = textutil.normalize(title)
     return any(

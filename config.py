@@ -422,6 +422,22 @@ DEDUP_WINDOW_DAYS = 14
 # reliable again.
 NEWRY_IE_LINK_MATCH_THRESHOLD = 0.75
 
+# Also stricter than SIMILARITY_THRESHOLD, same reasoning as
+# NEWRY_IE_LINK_MATCH_THRESHOLD above but for a different check: used by
+# newry_whats_on.find_similar_existing_event to decide whether a guide event
+# is already on the calendar under a different title/link from another
+# source. A false positive here doesn't just tolerate an occasional
+# cosmetic duplicate -- it means a real, distinct event silently never gets
+# added to the calendar at all, which is the worse failure mode for this
+# particular check. Confirmed live 2026-11-09: "Santa at the Castle"
+# (normalizes to just "santa castle", 2 tokens) scored exactly 0.5 against
+# the unrelated "Santa's SuperShow -- Bellini's Newry", also on the same
+# date, purely from sharing the single word "santa" -- SIMILARITY_THRESHOLD
+# would have let that through and dropped a real event. 0.75 requires
+# near-total containment of the shorter title's words, not just one shared
+# word, while still catching genuine same-event-different-wording repeats.
+CALENDAR_CROSS_SOURCE_DEDUP_THRESHOLD = 0.75
+
 # An entry older than this (by its feed-declared published/updated date) is
 # never posted, regardless of how it scores on every other check. Added
 # 2026-09-05 after noticing newry.ie's own feed carries at least one entry

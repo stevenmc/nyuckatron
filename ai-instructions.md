@@ -831,15 +831,14 @@ the same real-world event already being on the calendar under a
 *different* link, from newry.ie's own feed. `calendar_sync.
 list_upcoming_event_summaries` (a new `GET .../events` call, filtered
 to upcoming, `singleEvents=true`) plus `newry_whats_on.
-find_similar_existing_event` (same date + `textutil.similarity` above
-`config.SIMILARITY_THRESHOLD` -- the existing bar, not a new
-separately-tuned one) is the cross-source check. Confirmed live against
-the real calendar the day this shipped: of the guide's genuinely
-upcoming events, a clear majority (19 of 32) were already on the
-calendar under a slightly different title (`"Mike Denver & Guests"` vs.
-`"Mike Denver and Guests"`, `"Jake O'Kane — Subtle as a Sledgehammer"`
-vs. `"Jake O'Kane"`, and so on) -- without this check, re-crawling this
-source every run would have created a steady stream of near-duplicate
+find_similar_existing_event` (same date + `textutil.similarity`) is the
+cross-source check. Confirmed live against the real calendar the day
+this shipped: of the guide's genuinely upcoming events, a clear
+majority (19 of 32) were already on the calendar under a slightly
+different title (`"Mike Denver & Guests"` vs. `"Mike Denver and
+Guests"`, `"Jake O'Kane — Subtle as a Sledgehammer"` vs. `"Jake
+O'Kane"`, and so on) -- without this check, re-crawling this source
+every run would have created a steady stream of near-duplicate
 calendar entries.
 
 **`calendar_sync.sync_event` gained a `source_name` parameter
@@ -848,3 +847,38 @@ calendar entries.
 fine when it only had one caller; this source passes its own name
 (`"Newry What's On Guide"`) so a guide-sourced Calendar entry doesn't
 misattribute itself.
+
+**Three real bugs turned up on the first two live runs, none visible
+from reading the code alone:**
+
+1. `event_id_for` hashed by the bare link, but this source sometimes
+   lists several distinct dates for one real recurring event under one
+   shared link ("Santa at the Castle": three different December dates,
+   one page) -- all three hashed to the same Calendar ID and silently
+   overwrote each other down to a single survivor. `sync_event` gained
+   an `occurrence_key` parameter, hashed instead of the bare link when
+   given; newry.ie's own calls leave it unset so their already-synced
+   event IDs don't shift. The guide's own caller in `bot.sync_calendar`
+   passes `f"{link}|{start:%Y-%m-%d}"`.
+2. The Calendar API rejects a non-http(s) `source.url` outright (a
+   `"tel:+44..."` link 400'd with "Invalid source url") -- a handful of
+   guide events have no real web page, just a phone contact. `source`
+   is now only included in the request body when `link` actually starts
+   with `http://`/`https://`; the contact detail still reaches the
+   reader via the "More info: {link}" description line either way.
+3. `find_similar_existing_event` originally reused `SIMILARITY_THRESHOLD`
+   (0.5) -- the same bar Reddit/news dedup uses -- but that let "Santa at
+   the Castle" (normalizes to just `"santa castle"`, 2 tokens) get
+   treated as a duplicate of the unrelated "Santa's SuperShow —
+   Bellini's Newry", also on the same date, from sharing the single
+   word "santa" (overlap coefficient 1/2 = 0.5). That silently dropped
+   the Dec 6 occurrence from the calendar entirely. A false positive
+   here is costlier than the ones `SIMILARITY_THRESHOLD` already
+   tolerates elsewhere (a missed repost there just avoids a cosmetic
+   duplicate post; here it means a real event never reaches the
+   calendar at all), so this check now defaults to its own, stricter
+   `config.CALENDAR_CROSS_SOURCE_DEDUP_THRESHOLD` (0.75) instead --
+   same precedent as `NEWRY_IE_LINK_MATCH_THRESHOLD`, see that
+   constant's own comment in `config.py`. `SIMILARITY_THRESHOLD` itself
+   stays untouched -- see its own comment in `config.py` for why that
+   one is not up for renegotiation over a short-title false positive.
