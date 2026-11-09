@@ -40,6 +40,7 @@ import fuel_prices  # noqa: E402
 import heating_oil  # noqa: E402
 import linkclean  # noqa: E402
 import moderation  # noqa: E402
+import newry_whats_on  # noqa: E402
 import state  # noqa: E402
 import textutil  # noqa: E402
 
@@ -628,7 +629,16 @@ def sync_calendar():
     cheap, safe update rather than a duplicate -- and this way a calendar
     sync that failed on a prior run (Calendar API hiccup, say) still gets
     retried here regardless of whether the event was already posted to
-    Reddit, rather than being silently skipped forever."""
+    Reddit, rather than being silently skipped forever.
+
+    Also crawls a second, independent events source -- a hand-curated
+    "what's on" guide (newry_whats_on.py) -- every run, calendar-only,
+    never posted to Reddit, per the user's explicit instruction
+    (2026-11-09). Checked against the full current set of upcoming
+    calendar events (not just this source's own prior syncs) so a
+    newry.ie event and a guide event describing the same real-world
+    happening don't both end up with their own calendar entry -- see
+    newry_whats_on.find_similar_existing_event."""
     synced = 0
     for title, link in events.fetch_event_feed(config.EVENTS_FEED_URL):
         details = events.fetch_event_details(link)
@@ -639,6 +649,23 @@ def sync_calendar():
 
         if calendar_sync.sync_event(title, link, details["start"], details["end"], details["venue"]):
             synced += 1
+
+    existing_events = calendar_sync.list_upcoming_event_summaries()
+    for title, link, start, end, venue, description in newry_whats_on.fetch_events():
+        if events.is_in_the_past(start):
+            log.info("Skipping guide event (already started/passed): %s", title)
+            continue
+
+        if newry_whats_on.find_similar_existing_event(title, start, existing_events):
+            log.info("Skipping guide event (similar to an existing calendar entry): %s", title)
+            continue
+
+        if calendar_sync.sync_event(
+            title, link, start, end, venue, description=description, source_name="Newry What's On Guide"
+        ):
+            synced += 1
+            existing_events.append((title, start.strftime("%Y-%m-%d")))
+
     log.info("Calendar sync complete. Synced %d event(s).", synced)
 
 

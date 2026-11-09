@@ -767,3 +767,84 @@ City |"`), which `strip_vendor_suffix` then had no way to clean up
 itself (it only recognises a separator with whitespace on *both*
 sides, and there's nothing after a trailing one). Fixed by adding `"|"`
 to that rstrip charset.
+
+## Second events source: the Newry What's On guide (`newry_whats_on.py`, `calendar_sync.py`)
+
+**Added 2026-11-09 at the user's explicit instruction: calendar-only,
+never posted to Reddit.** `config.NEWRY_WHATS_ON_URL`
+(`newry-whats-on-guide.macko33.chatgpt.site/events.js`) is a
+hand-curated "what's on" guide -- a browser-oriented JS file
+(`window.NEWRY_GUIDE = { updatedAt, scope, events: [...] }` followed by
+trailing display logic this project never needs), not an API or RSS
+feed. `bot.sync_calendar()` crawls it every run alongside newry.ie's own
+events feed, both landing in the same Google Calendar.
+
+**Parsing it without a JS-evaluation dependency was a deliberate
+choice, made after actually checking what that would cost.** Node is
+available in dev but wasn't going to be assumed on the EC2 box without
+checking first, and this project already paid once for assuming a
+runtime would be available there and being wrong (Playwright's GLIBC
+2.28 requirement vs. Bionic's 2.27 -- see linkclean.py's
+`GoogleNewsBrowserResolver`). A `json5`-style library was the other
+option considered. Once the trailing display-logic code is sliced off
+(see below), what's left really is a single, bounded, well-understood
+object literal -- the same kind of problem this project already solves
+with small hand-rolled parsers elsewhere (`events.py`'s HTML-table
+regex, `heating_oil.py`'s article regex) rather than reaching for a
+bigger dependency. `_extract_object_literal` finds the matching closing
+brace by tracking depth while skipping over string-literal contents (so
+a brace inside a description can't confuse it), and `_quote_bare_keys`
+quotes the object's unquoted JS keys -- again skipping string
+contents, so a colon or comma inside a real description is never
+touched -- before handing the result to `json.loads`. **If this source
+ever changes its own structure enough that this parser breaks, the fix
+is almost certainly a small adjustment to these two functions, not a
+reason to reach for Node or a JS library instead** -- the actual data
+shape is simple; only the trailing logic around it isn't, and that part
+is never parsed at all, just skipped over.
+
+**Same encoding bug as `heating_oil.py`'s niliving.co.uk fix, confirmed
+again here**: this site's `Content-Type` also carries no charset, so
+`requests` defaults to ISO-8859-1 and mangles every apostrophe/em-dash.
+`fetch_events` sets `response.encoding = "utf-8"` explicitly before
+reading `.text`, same fix, same root cause, a different site -- worth
+checking for on *any* new external text fetch in this project before
+assuming the mangling is something else.
+
+**The `time` field is free text, not a structured field** ("9pm", "8pm
+to late", "Check with organiser", "Programme to be published", ...) --
+confirmed live, over a quarter of real entries have no parseable clock
+time in it at all. `parse_event_times` does a best-effort extraction of
+the first (start) and, if present, second (end) clock-time-shaped
+mention, and defaults to midnight rather than dropping the event
+entirely when neither is found -- the same "date-only, don't drop it"
+convention `events.py`'s own `_parse_event_date_row` already
+established for newry.ie's events. A dropped event over a missing
+*time* would be losing it over presentation, not substance.
+
+**"Nothing similar already in it" needed a genuinely new capability:
+reading the calendar back, not just writing to it.** Every other use of
+`calendar_sync.py` before this was write-only (insert/update by a
+deterministic ID derived from the link) -- which already prevents this
+source from duplicating its *own* prior syncs, but does nothing about
+the same real-world event already being on the calendar under a
+*different* link, from newry.ie's own feed. `calendar_sync.
+list_upcoming_event_summaries` (a new `GET .../events` call, filtered
+to upcoming, `singleEvents=true`) plus `newry_whats_on.
+find_similar_existing_event` (same date + `textutil.similarity` above
+`config.SIMILARITY_THRESHOLD` -- the existing bar, not a new
+separately-tuned one) is the cross-source check. Confirmed live against
+the real calendar the day this shipped: of the guide's genuinely
+upcoming events, a clear majority (19 of 32) were already on the
+calendar under a slightly different title (`"Mike Denver & Guests"` vs.
+`"Mike Denver and Guests"`, `"Jake O'Kane — Subtle as a Sledgehammer"`
+vs. `"Jake O'Kane"`, and so on) -- without this check, re-crawling this
+source every run would have created a steady stream of near-duplicate
+calendar entries.
+
+**`calendar_sync.sync_event` gained a `source_name` parameter
+(default `"newry.ie"`) for this.** It previously hardcoded
+`"newry.ie"` into every synced event's `source.title` field, which was
+fine when it only had one caller; this source passes its own name
+(`"Newry What's On Guide"`) so a guide-sourced Calendar entry doesn't
+misattribute itself.

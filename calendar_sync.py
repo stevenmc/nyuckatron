@@ -31,7 +31,7 @@ now fixed -- neither was visible from reading the code alone:
 
 import hashlib
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import requests
@@ -88,7 +88,7 @@ def event_id_for(link):
     return "nerie" + digest[:24]
 
 
-def sync_event(title, link, start, end, venue, description=""):
+def sync_event(title, link, start, end, venue, description="", source_name="newry.ie"):
     """Upserts one event into the configured Google Calendar. Returns the
     event's Calendar `htmlLink` (a real, truthy URL string) on success, or
     a falsy value (None or False) otherwise (including when Calendar
@@ -99,7 +99,12 @@ def sync_event(title, link, start, end, venue, description=""):
     this returned a bare bool -- any non-empty string is truthy. The
     htmlLink itself exists to let a caller fall back to linking the
     Calendar entry directly when no better link is available (see
-    events_widget.py) -- it was previously fetched and discarded."""
+    events_widget.py) -- it was previously fetched and discarded.
+
+    `source_name` labels the Calendar event's `source.title` field --
+    defaults to "newry.ie" since that was this function's only caller
+    for a long time, but a second source (see newry_whats_on.py) passes
+    its own name so the Calendar entry doesn't misattribute itself."""
     if not is_configured():
         global _warned_not_configured
         if not _warned_not_configured:
@@ -124,7 +129,7 @@ def sync_event(title, link, start, end, venue, description=""):
         "description": (description + f"\n\nMore info: {link}").strip(),
         "start": {"dateTime": start.isoformat(), "timeZone": _TIMEZONE},
         "end": {"dateTime": end.isoformat(), "timeZone": _TIMEZONE},
-        "source": {"title": "newry.ie", "url": link},
+        "source": {"title": source_name, "url": link},
     }
 
     try:
@@ -156,3 +161,45 @@ def sync_event(title, link, start, end, venue, description=""):
     except Exception:
         log.exception("Failed to sync event '%s' to calendar", title)
         return None
+
+
+def list_upcoming_event_summaries(days_ahead=60):
+    """(summary, "YYYY-MM-DD") for every event in the configured
+    calendar between now and `days_ahead` days out, regardless of which
+    source created it. Exists so a second events source (see
+    newry_whats_on.py) can check whether something *similar* is already
+    on the calendar -- e.g. the same real-world event listed by both
+    newry.ie's own feed and the What's On guide, under two different
+    titles and links -- rather than only catching an exact repeat of its
+    own prior syncs (which event_id_for's upsert already handles for
+    free). Returns [] if not configured or on any failure -- never
+    raises, same contract as sync_event."""
+    if not is_configured():
+        return []
+    try:
+        headers = {"Authorization": f"Bearer {_access_token()}"}
+        calendar_id = quote(config.GOOGLE_CALENDAR_ID, safe="")
+        now = datetime.now(timezone.utc)
+        response = requests.get(
+            f"{_API_BASE}/calendars/{calendar_id}/events",
+            headers=headers,
+            params={
+                "timeMin": now.isoformat(),
+                "timeMax": (now + timedelta(days=days_ahead)).isoformat(),
+                "singleEvents": "true",
+                "maxResults": 250,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        results = []
+        for item in response.json().get("items", []):
+            summary = item.get("summary")
+            start = item.get("start", {})
+            date_value = (start.get("dateTime") or start.get("date") or "")[:10]
+            if summary and date_value:
+                results.append((summary, date_value))
+        return results
+    except Exception:
+        log.exception("Failed to list upcoming calendar events")
+        return []

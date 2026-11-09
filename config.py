@@ -22,6 +22,15 @@ DEFAULT_EVENT_DURATION_HOURS = 1
 
 EVENTS_FEED_URL = "https://www.newry.ie/events?format=feed&type=rss"
 
+# A second, independent events source -- a hand-curated "what's on"
+# guide, not an API -- synced to the calendar only (bot.sync_calendar
+# via newry_whats_on.py), never posted to Reddit, per the user's
+# explicit instruction (2026-11-09). Entirely separate from newry.ie's
+# own events feed above; see newry_whats_on.py for why its own update
+# cadence (the page's updatedAt field) doesn't need separate tracking
+# here -- every sync_calendar run just re-crawls and re-upserts.
+NEWRY_WHATS_ON_URL = "https://newry-whats-on-guide.macko33.chatgpt.site/events.js"
+
 # r/newry's native sidebar "Calendar" widget couldn't show per-event
 # links at all -- confirmed by reading praw's widgets.py directly and
 # inspecting its live data: its configuration schema is only six

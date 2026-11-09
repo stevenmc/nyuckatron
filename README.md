@@ -105,6 +105,16 @@ by cron -- no server, nothing kept running between runs.
   (`exchange_rates.py`), the cheapest fresh local petrol/diesel price
   (`fuel_prices.py`), and the top 3 cheapest 500L heating oil suppliers in
   NI (`heating_oil.py`) -- see "Subreddit sidebar" below.
+- `sync_calendar` also crawls a second, independent events source every
+  run -- `config.NEWRY_WHATS_ON_URL`, a hand-curated "what's on" guide
+  (`newry_whats_on.py`) -- and syncs it to the same Google Calendar.
+  Calendar-only, by explicit instruction: never posted to Reddit, and
+  not part of the sidebar widget either. Checked against every upcoming
+  event already on the calendar (not just this source's own prior
+  syncs, via `calendar_sync.list_upcoming_event_summaries` +
+  `newry_whats_on.find_similar_existing_event`) so a newry.ie event and
+  a guide event describing the same real-world happening don't both get
+  their own calendar entry.
 
 ## Subreddit sidebar
 
@@ -218,13 +228,14 @@ make test
 ```
 
 Runs offline against mocked Reddit/feed data -- no credentials or network
-needed. 215 tests covering the dedup similarity logic, link/title cleanup,
+needed. 255 tests covering the dedup similarity logic, link/title cleanup,
 local state, Reddit moderation actions (spam-queue check, own-post
 auto-approve, flair selection, live-duplicate check, alternate-source
 commenting), the events/calendar pipeline, the news-age/max_entries
-limiters, and the sidebar events widget (event-link formatting, the
+limiters, the sidebar events widget (event-link formatting, the
 GBP/EUR exchange rate, local fuel prices, and heating oil supplier
-prices).
+prices), and the What's On guide's JS-object parsing and cross-source
+calendar dedup.
 
 ### 6. Schedule it
 
@@ -639,7 +650,7 @@ High-level dependency inventory. Exact pinned versions are in
 | [prawcore](https://github.com/praw-dev/prawcore) | 4.0.0 | Low-level HTTP/auth layer under praw; imported directly for its `Forbidden` exception | BSD |
 | [feedparser](https://feedparser.readthedocs.io/) | 6.0.11 | Parses RSS/Atom feeds (BBC NI, newry.ie, Newry Democrat, Google News) | BSD-2-Clause |
 | [python-dotenv](https://github.com/theskumar/python-dotenv) | 1.0.1 | Loads `.env` into the process environment | BSD-3-Clause |
-| [requests](https://requests.readthedocs.io/) | 2.34.2 | HTTP calls for event-page scraping, the live Google News link resolver (`linkclean.resolve_google_news_url_live`), newry.ie's homepage scrape, and the sidebar widget's external data (`fuel_prices.py`'s fuelcosts.co.uk API, `heating_oil.py`'s niliving.co.uk scrape, `exchange_rates.py`'s Frankfurter API) | Apache-2.0 |
+| [requests](https://requests.readthedocs.io/) | 2.34.2 | HTTP calls for event-page scraping, the live Google News link resolver (`linkclean.resolve_google_news_url_live`), newry.ie's homepage scrape, the sidebar widget's external data (`fuel_prices.py`'s fuelcosts.co.uk API, `heating_oil.py`'s niliving.co.uk scrape, `exchange_rates.py`'s Frankfurter API), and `newry_whats_on.py`'s guide fetch | Apache-2.0 |
 | [google-auth](https://google-auth.readthedocs.io/) | 2.57.1 | Service-account JWT signing/auth for `calendar_sync.py`'s direct REST calls to the Calendar API | Apache-2.0 |
 | [cryptography](https://cryptography.io/) | 48.0.1 | google-auth's JWT-signing backend; pinned below latest -- see requirements.txt's comment (an x86_64/Intel Mac architecture limit, not a Python-version one) | Apache-2.0 / BSD |
 | [pytest](https://pytest.org/) | 8.4.2 | Test runner (dev/test only, not needed to run the bot) | MIT |

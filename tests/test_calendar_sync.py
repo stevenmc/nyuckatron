@@ -145,3 +145,79 @@ def test_sync_event_returns_false_and_does_not_raise_on_request_failure(monkeypa
     )
 
     assert not result  # should not raise
+
+
+def test_sync_event_defaults_source_name_to_newry_ie(monkeypatch):
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    mock_put = MagicMock(return_value=_mock_response(200))
+    monkeypatch.setattr(calendar_sync.requests, "put", mock_put)
+
+    calendar_sync.sync_event("Event", "https://www.newry.ie/events/1", datetime(2026, 9, 6, 11, 0), None, "Venue")
+
+    _, kwargs = mock_put.call_args
+    assert kwargs["json"]["source"] == {"title": "newry.ie", "url": "https://www.newry.ie/events/1"}
+
+
+def test_sync_event_uses_a_custom_source_name_when_given(monkeypatch):
+    # A second events source (newry_whats_on.py) passes its own name so
+    # the Calendar entry doesn't misattribute itself as "newry.ie".
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    mock_put = MagicMock(return_value=_mock_response(200))
+    monkeypatch.setattr(calendar_sync.requests, "put", mock_put)
+
+    calendar_sync.sync_event(
+        "Event", "https://example.com/1", datetime(2026, 9, 6, 11, 0), None, "Venue",
+        source_name="Newry What's On Guide",
+    )
+
+    _, kwargs = mock_put.call_args
+    assert kwargs["json"]["source"] == {"title": "Newry What's On Guide", "url": "https://example.com/1"}
+
+
+# --- list_upcoming_event_summaries ------------------------------------------
+
+def test_list_upcoming_event_summaries_returns_empty_when_not_configured(monkeypatch):
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", None)
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", None)
+
+    assert calendar_sync.list_upcoming_event_summaries() == []
+
+
+def test_list_upcoming_event_summaries_returns_summary_and_date_pairs(monkeypatch):
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json = MagicMock(return_value={
+        "items": [
+            {"summary": "Timed Event", "start": {"dateTime": "2026-11-14T19:00:00Z"}},
+            {"summary": "All-Day Event", "start": {"date": "2026-11-20"}},
+            {"summary": "No Start Info"},  # missing start -- skipped, not fatal
+            {"start": {"date": "2026-11-21"}},  # missing summary -- skipped
+        ]
+    })
+    monkeypatch.setattr(calendar_sync.requests, "get", MagicMock(return_value=resp))
+
+    results = calendar_sync.list_upcoming_event_summaries()
+
+    assert results == [("Timed Event", "2026-11-14"), ("All-Day Event", "2026-11-20")]
+
+
+def test_list_upcoming_event_summaries_fails_open_on_request_exception(monkeypatch):
+    monkeypatch.setattr(config, "GOOGLE_SERVICE_ACCOUNT_FILE", "/path/to/key.json")
+    monkeypatch.setattr(config, "GOOGLE_CALENDAR_ID", "abc@group.calendar.google.com")
+    monkeypatch.setattr(calendar_sync, "_access_token", lambda: "fake-token")
+
+    import requests
+
+    monkeypatch.setattr(calendar_sync.requests, "get", MagicMock(side_effect=requests.ConnectionError("down")))
+
+    assert calendar_sync.list_upcoming_event_summaries() == []  # doesn't raise
