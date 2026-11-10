@@ -32,16 +32,17 @@
     if (!config) {
       throw new Error('Not configured yet -- open the extension options and set a server URL + token.');
     }
-    const response = await fetch(config.endpointBaseUrl + '/capture.php', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Capture-Token': config.captureToken,
-      },
-      body: JSON.stringify(bundle),
+    // Relayed through the background service worker, not fetched here --
+    // see background.js's own comment for why a content script's fetch
+    // to a third-party host gets blocked by Facebook's own CSP.
+    const result = await chrome.runtime.sendMessage({
+      type: 'nec-capture',
+      endpointBaseUrl: config.endpointBaseUrl,
+      captureToken: config.captureToken,
+      bundle,
     });
-    if (!response.ok) {
-      throw new Error('Server rejected capture: HTTP ' + response.status);
+    if (!result || !result.ok) {
+      throw new Error((result && result.error) || 'Capture failed for an unknown reason');
     }
   }
 

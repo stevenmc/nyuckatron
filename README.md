@@ -565,10 +565,20 @@ Two independent pieces, each with its own test suite:
   own "Actions for this post" button; clicking it extracts the post's
   text/author/image/timestamp/permalink (plus any formal Event-card
   fields) and POSTs it to your server, flipping the dot to a green
-  checkmark on success. No Facebook automation of any kind -- every
-  capture is a real click by a real person. See that directory's
-  `extract.js` for the selector strategy, verified against a real
-  (but never committed -- see ai-instructions.md) snapshot of a feed.
+  checkmark on success -- or red if that capture failed (check the
+  console for a `[Newry Events Capture]` line; usually either the post
+  didn't match the expected structure, or the capture.php request
+  itself failed). No Facebook automation of any kind -- every capture
+  is a real click by a real person. See that directory's `extract.js`
+  for the selector strategy, verified against a real (but never
+  committed -- see ai-instructions.md) snapshot of a feed. The actual
+  POST happens in `background.js`, not `content.js` -- a content
+  script's `fetch()` is still bound by the host page's CSP, and
+  Facebook's own CSP blocks a direct connect-src to a third-party host
+  (confirmed live: "TypeError: Failed to fetch" with the server itself
+  reachable fine by curl) -- so `content.js` relays the capture to the
+  background service worker via `chrome.runtime.sendMessage` instead,
+  which isn't bound by any page's CSP.
   Load it via `chrome://extensions` -> "Load unpacked", then open the
   extension's options page and set your server's base URL + the shared
   token (see below). Test with `cd facebook-events-extension && npm

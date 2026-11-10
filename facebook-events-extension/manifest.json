@@ -18,7 +18,14 @@
   },
   "options_page": "options.html",
   "permissions": ["storage"],
-  "host_permissions": ["https://www.facebook.com/*", "https://facebook.com/*"],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://facebook.com/*",
+    "https://fb-events.stevenmccullagh.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://www.facebook.com/*", "https://facebook.com/*"],

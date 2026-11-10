@@ -12,3 +12,4 @@ __pycache__/
 facebook-capture/data/
 facebook-capture/phpunit.phar
 facebook-events-extension/node_modules/
+.DS_Store

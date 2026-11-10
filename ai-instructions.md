@@ -978,6 +978,30 @@ extension context. The fixture
 content, not copied from the user's real snapshot, for the same privacy
 reason the real snapshot itself was never committed.
 
+**The actual POST to `capture.php` happens in `background.js`, not
+`content.js` -- found live, not anticipated up front.** The first real
+capture attempt failed with `TypeError: Failed to fetch` from
+`content.js`'s own `fetch()` call, while the exact same URL was
+reachable fine via `curl` from outside the browser -- ruling out a
+server-side cause. This is a well-known Manifest V3 gotcha: a content
+script's `fetch`/`XHR` is still bound by the *host page's* own
+Content-Security-Policy `connect-src` directive, and Facebook's CSP
+blocks a direct connection to an arbitrary third-party host --
+`host_permissions` in the manifest doesn't change that, it only governs
+cross-origin *fetch from an extension page*, not a content script's
+network calls, which run inside the page's own document for CSP
+purposes regardless. The fix: `content.js` relays the capture via
+`chrome.runtime.sendMessage({type: 'nec-capture', ...})` to
+`background.js`'s service worker, which has no host page and isn't
+bound by any page's CSP, and performs the real `fetch` there. The
+server origin (`https://fb-events.stevenmccullagh.com/*`) was also added
+to `host_permissions` -- needed for the background fetch to bypass the
+server's own (absent) CORS headers, since without it a cross-origin
+fetch from the service worker would still fail reading the response.
+If the configured server URL is ever changed in the options page, this
+manifest entry needs updating to match, or captures will start failing
+the same way again.
+
 **Server side (`facebook-capture/`) deliberately has no Composer
 dependency either** -- six small `src/*.php` files via plain
 `require_once` (`src/bootstrap.php`), matching this project's existing
