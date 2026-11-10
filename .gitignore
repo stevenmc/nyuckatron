@@ -7,3 +7,8 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+
+# facebook-capture (PHP component)
+facebook-capture/data/
+facebook-capture/phpunit.phar
+facebook-events-extension/node_modules/

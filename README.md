@@ -547,6 +547,51 @@ match is never certain enough to silently bin. The comment is added once
 and only once (recorded in `state.db`, and the function also scans for its
 own earlier comment as a backstop).
 
+## Facebook events capture
+
+A separate subsystem (added 2026-11-10) for local events that only ever
+get posted to Facebook, which this project deliberately never scrapes or
+automates -- see `facebook-capture/src/Store.php` and
+`facebook-events-extension/content.js` for the full reasoning. Instead, a
+human (you) is the discovery mechanism: browse Facebook normally, click a
+small capture button on a post worth keeping, and it's queued server-side
+for a downstream ChatGPT scheduled task (built elsewhere, out of scope
+here) to turn into real Google Calendar events.
+
+Two independent pieces, each with its own test suite:
+
+- **`facebook-events-extension/`** -- an unpacked Manifest V3 Chrome
+  extension, `facebook.com`-only. Adds a 15px dot next to each post's
+  own "Actions for this post" button; clicking it extracts the post's
+  text/author/image/timestamp/permalink (plus any formal Event-card
+  fields) and POSTs it to your server, flipping the dot to a green
+  checkmark on success. No Facebook automation of any kind -- every
+  capture is a real click by a real person. See that directory's
+  `extract.js` for the selector strategy, verified against a real
+  (but never committed -- see ai-instructions.md) snapshot of a feed.
+  Load it via `chrome://extensions` -> "Load unpacked", then open the
+  extension's options page and set your server's base URL + the shared
+  token (see below). Test with `cd facebook-events-extension && npm
+  install && npm test` (Node + jsdom, no browser needed).
+- **`facebook-capture/`** -- the PHP server piece, deployed to
+  `fb-events.stevenmccullagh.com` (its own nginx vhost + Let's Encrypt
+  cert on the same EC2 box as everything else, PHP-FPM, no database --
+  flat JSON files under `data/`, gitignored). `public/capture.php`
+  (POST, token-gated) appends a capture to the pending queue.
+  `public/feed.php` (GET, same token) is read-only by default -- the
+  URL for eyeballing what's queued -- but `?flushwhendone` returns the
+  queue and then clears it, only after appending the flushed batch to
+  that day's `data/flushed/YYYY-MM-DD.json` audit log first, so a
+  downstream failure can never silently lose a capture. That
+  `?flushwhendone` URL (with the token) is what gets handed to the
+  ChatGPT scheduled task. Generate the shared token with `php -r "echo
+  bin2hex(random_bytes(32));"`, put it in `facebook-capture/.env`
+  (never committed -- see `.env.example`) as `FB_CAPTURE_TOKEN=...`,
+  and the same value into the extension's options page. Test with `php
+  phpunit.phar` after downloading it (`curl -sSL -o
+  facebook-capture/phpunit.phar https://phar.phpunit.de/phpunit-11.phar`)
+  -- no Composer, matching this project's dependency-light convention.
+
 ## Known limitations
 
 - **Newry Reporter's category feeds exist but are empty; its site-wide

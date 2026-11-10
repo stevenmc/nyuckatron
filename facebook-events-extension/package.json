@@ -1,0 +1,11 @@
+{
+  "name": "newry-events-capture-extension",
+  "private": true,
+  "description": "Test tooling only -- the shipped extension itself (manifest.json, extract.js, content.js, options.*) is plain, dependency-free files loaded unpacked, no build step.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

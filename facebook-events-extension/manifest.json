@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Newry Events Capture",
+  "version": "1.0.0",
+  "description": "Adds a one-click capture button to Facebook posts and sends the raw post data to your own server -- no automation of Facebook itself, you drive every capture by hand.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "options.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options.html",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.facebook.com/*", "https://facebook.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.facebook.com/*", "https://facebook.com/*"],
+      "js": ["extract.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <!-- Noise: other aria-haspopup="menu" buttons that must NOT be treated
+       as a post's own three-dot menu -- confirmed these exist alongside
+       real post menus on a real feed page (see extract.js's docblock). -->
+  <div role="button" aria-haspopup="menu" aria-label="More footer links"></div>
+  <div role="button" aria-haspopup="menu" aria-label="Hide or report this"></div>
+  <div role="button" aria-haspopup="menu" aria-label="Open menu for Some Ad sponsored content"></div>
+
+  <!-- Post A: no formal event card, no real permalink href (the common
+       case for a plain text/photo organic post, per the real snapshot). -->
+  <div aria-labelledby="authorA timeA privacyA textA">
+    <h4 id="authorA">Test Page One</h4>
+    <span id="timeA">3h</span>
+    <span id="privacyA">Shared with Public</span>
+    <div data-ad-rendering-role="profile_name">Test Page One</div>
+    <div data-ad-rendering-role="story_message" id="textA">Join us Friday for a community coffee morning.</div>
+    <img src="https://example.com/photo-large.jpg" width="200" height="200">
+    <img src="https://example.com/icon-small.png" width="16" height="16">
+    <div role="button" aria-haspopup="menu" aria-label="Actions for this post by Test Page One"></div>
+  </div>
+
+  <!-- Post B: has a real permalink-shaped href and a best-effort Event
+       card (UNVERIFIED shape -- see extract.js's docblock). -->
+  <div aria-labelledby="authorB timeB privacyB textB">
+    <h4 id="authorB">Test Page Two Verified account</h4>
+    <span id="timeB">yesterday at 9pm</span>
+    <span id="privacyB">Public</span>
+    <div data-ad-rendering-role="profile_name">Test Page Two Verified account</div>
+    <div data-ad-rendering-role="story_message" id="textB">Our Christmas market returns this year!</div>
+    <a href="/TestPageTwo/posts/998877">permalink stand-in</a>
+    <div>
+      <a href="/events/4242">Christmas Market 2026</a>
+      <div data-ad-rendering-role="meta">Sat, 12 Dec, 6:00 PM</div>
+      <div data-ad-rendering-role="description">Town Square</div>
+    </div>
+    <div role="button" aria-haspopup="menu" aria-label="Actions for this post by Test Page Two"></div>
+  </div>
+
+  <!-- Post C: no author, no text, no timestamp ids at all -- extraction
+       must fail open (nulls), never throw. -->
+  <div aria-labelledby="onlyone">
+    <span id="onlyone">lonely label</span>
+    <div role="button" aria-haspopup="menu" aria-label="Actions for this post"></div>
+  </div>
+</body>
+</html>

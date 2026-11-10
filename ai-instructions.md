@@ -882,3 +882,130 @@ from reading the code alone:**
    constant's own comment in `config.py`. `SIMILARITY_THRESHOLD` itself
    stays untouched -- see its own comment in `config.py` for why that
    one is not up for renegotiation over a short-title false positive.
+
+## Facebook events capture (`facebook-capture/`, `facebook-events-extension/`)
+
+**Added 2026-11-10 at the user's explicit instruction, decided in a
+separate design conversation before implementation started (see the
+`fb-events-capture-design` memory for that decision's own reasoning).**
+The user explicitly ruled out every form of Facebook scraping or
+automation -- Graph API (locked down for personal apps), logged-out
+`mbasic` scraping (gated behind a login wall for most content now), and
+logged-in automated scraping (rejected outright: it risks the user's
+real account being restricted). The design instead makes the user
+themselves the discovery mechanism: a Chrome extension adds a one-click
+capture button to each post; nothing in this system ever logs into or
+automates against facebook.com.
+
+**Selector strategy was verified, not guessed, against a real snapshot
+of the user's own feed -- without logging into or browsing Facebook
+myself.** The user sent a "Copy outerHTML" HTML snapshot (Desktop,
+never committed to this repo -- it contains their real friends' and
+pages' private feed content) and it was inspected locally with
+BeautifulSoup to confirm the actual structure before writing any
+selector code. Findings, all confirmed live in that snapshot:
+
+- The three-dot menu on an organic post is a
+  `div[role="button"][aria-haspopup="menu"]` whose `aria-label` starts
+  with `"Actions for this post"` (optionally `"... by <author>"`).
+  Three *other* `aria-haspopup="menu"` buttons exist on the same feed
+  page and must NOT match: `"More footer links"` (page chrome),
+  `"Hide or report this"` and `"Open menu for ... sponsored content"`
+  (ads) -- the `"Actions for this post"` prefix excludes all three
+  without needing to special-case them.
+- The nearest ancestor of that button carrying an `aria-labelledby`
+  attribute is the post's own root -- Facebook composes that attribute
+  from several child element ids to label the whole story for screen
+  readers, which happens exactly once per post. Those ids are also in
+  reading order: the 1st labels the author, the 2nd the timestamp --
+  used by `extractTimestampText` since there's no semantic attribute
+  for the timestamp the way there is for the others (next point).
+- Facebook tags the semantically meaningful parts of a post with a
+  stable `data-ad-rendering-role` attribute -- used internally for ad
+  accessibility rendering, so unlike class names (confirmed: full of
+  short auto-generated utility classes like `x1n2onr6` that mean
+  nothing from one load to the next) it isn't churned. `"profile_name"`
+  reliably finds the author, `"story_message"` the post's own text, on
+  every organic post in the snapshot.
+- **A post's visible timestamp text can come back from the DOM with its
+  character order scrambled** -- confirmed live: one timestamp's
+  `innerText` was a shuffled string of individual letters and digits,
+  no readable substring longer than one character. This is apparently a
+  Facebook anti-scraping measure and there is no reliable way around it
+  from the DOM alone: it isn't the kind of CSS-paint-order trick that
+  `innerText` (vs. `textContent`) would fix, since neither follows
+  flex/grid `order`-reordered visual layout -- both still walk the flat
+  tree in DOM order. No `title`, `aria-label`, `data-utime`, or `<time
+  datetime>` fallback carrying the real text was present either. Given
+  this, `timestampText` is captured as best-effort, possibly-garbled
+  supplementary context only -- which costs nothing, because the
+  user's own spec already deferred all real date parsing to the
+  downstream ChatGPT task reading the post's own free text, not this
+  metadata badge.
+- **No real permalink href exists on a plain text/photo organic post.**
+  The visible timestamp element's href was just a click-tracking
+  fragment (`?__cft__=...#?bfg`); real navigation is handled by a JS
+  click handler, not a crawlable link. Only reel/photo/video
+  attachments carried a real, permalink-shaped href
+  (`/reel/<id>/...`, `/photo/?fbid=...`, etc.) in the snapshot.
+  `extractPermalink` therefore genuinely returns `null` for most organic
+  posts -- `CaptureController`/`Store` accept that (nothing in this
+  pipeline requires a permalink; see "never silently lose data" below),
+  and the local dedup key (`dedupKeyFor`) falls back to a hash of
+  author+text+timestamp when there's no permalink to key on.
+- **No real Facebook "Event" card (a post with a formal attached
+  event -- its own date/time/location) was present in the snapshot.**
+  `extractEventCard` is therefore explicitly marked UNVERIFIED in its
+  own comment -- a best-effort reading of the generally-known shape (a
+  link to `/events/<id>` plus nearby title/date/location text) that
+  fails open (`null`) rather than guessing further. Revisit it against
+  a real example -- ask the user for another snapshot of a post with an
+  actual Event card attached -- the first time this matters in
+  practice.
+
+**Extraction logic lives in `extract.js`, split out from `content.js`**
+specifically so it has zero `chrome.*` dependency and can be unit-tested
+under plain Node (`facebook-events-extension/test/extract.test.mjs`, via
+`jsdom` -- the one Node devDependency this subproject has, scoped to
+testing only; the *shipped* extension stays plain files, no bundler, per
+the user's own spec). Both files are loaded into the same content-script
+isolated world (`manifest.json`'s `"js": ["extract.js", "content.js"]`),
+so `extract.js`'s plain function declarations are ordinary globals to
+`content.js` in the browser; `extract.js` also carries a guarded
+`module.exports` purely for the Node test run, a no-op in the real
+extension context. The fixture
+(`test/fixtures/feed-sample.html`) is hand-written with fake placeholder
+content, not copied from the user's real snapshot, for the same privacy
+reason the real snapshot itself was never committed.
+
+**Server side (`facebook-capture/`) deliberately has no Composer
+dependency either** -- six small `src/*.php` files via plain
+`require_once` (`src/bootstrap.php`), matching this project's existing
+hand-rolled-over-dependency convention on the Python side. Tests use the
+standalone PHPUnit PHAR (`phar.phpunit.de`, not committed -- see
+`.gitignore`) rather than Composer, for the same reason: this project
+has no PHP/Composer precedent to extend, and a single self-contained
+PHAR is the lighter option. `Store.php`'s `append`/`peekPending`/`flush`
+all go through `withLock` (`flock`, held for the whole operation) on
+`pending.json`, specifically so a capture that lands "during" a flush
+can never be silently dropped -- it simply blocks until the flush's
+lock releases, then appends into what is by then the fresh, empty
+store. `flush()` writes the dated backup log *before* clearing
+`pending.json`, in that order, so a failure writing the backup leaves
+`pending.json` untouched rather than cleared out from under a backup
+that was never actually written.
+
+**Deploy:** its own subdomain, `fb-events.stevenmccullagh.com` -- a new
+Route53 A record (zone `Z08145523O7MXW4ALGZVV`) pointing at the same EIP
+(`54.217.200.234`) every other `*.stevenmccullagh.com` subdomain on this
+box uses, a new nginx vhost (`/etc/nginx/sites-available/fb-events.stevenmccullagh.com`,
+same PHP-FPM-socket pattern as `printsplace.co.uk`), and its own
+Let's Encrypt cert via `certbot --nginx` (the box's certbot already had
+a registered ACME account from the other vhosts, so no new
+registration was needed). `public/` is nginx's docroot and contains only
+`capture.php`/`feed.php`; `src/`, `data/`, and `.env` all live one level
+up, outside the docroot entirely, so there's nothing else there to
+accidentally expose even without an explicit nginx deny rule. This is
+the first web-facing component this project has ever deployed --
+`nyuckatron`'s own directory on the box (where `bot.py` runs from cron)
+was never a web vhost at all.

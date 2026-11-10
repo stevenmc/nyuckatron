@@ -1,0 +1,46 @@
+/* The capture control itself: a 15px circle, unfilled dot until a
+   successful capture, then a filled green checkmark. Sits as a sibling
+   immediately after the post's own "Actions for this post" button (see
+   content.js), so it inherits that button's position in the post header
+   without needing any Facebook-specific layout assumptions beyond "it's
+   next to the menu button". */
+.nec-capture-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  border-radius: 50%;
+  border: 2px solid #1b7f3a;
+  background: transparent;
+  margin-left: 6px;
+  cursor: pointer;
+  vertical-align: middle;
+  font-size: 10px;
+  line-height: 1;
+  color: transparent;
+  user-select: none;
+  box-sizing: border-box;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.nec-capture-dot:hover {
+  background: rgba(27, 127, 58, 0.18);
+}
+
+.nec-capture-dot[data-state="pending"] {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.nec-capture-dot[data-state="done"] {
+  background: #1b7f3a;
+  color: #ffffff;
+}
+
+.nec-capture-dot[data-state="error"] {
+  border-color: #c0392b;
+  background: rgba(192, 57, 43, 0.12);
+}

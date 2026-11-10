@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Newry Events Capture -- Settings</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; width: 320px; padding: 12px; color: #1c1e21; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px; }
+  input { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13px; border: 1px solid #ccd0d5; border-radius: 4px; }
+  button { margin-top: 12px; padding: 6px 14px; font-size: 13px; border: none; border-radius: 4px; background: #1b7f3a; color: white; cursor: pointer; }
+  button:hover { background: #166830; }
+  #status { margin-top: 8px; font-size: 12px; min-height: 14px; }
+  #status.ok { color: #1b7f3a; }
+  #status.err { color: #c0392b; }
+</style>
+</head>
+<body>
+  <h1>Newry Events Capture</h1>
+  <label for="endpoint">Server base URL</label>
+  <input id="endpoint" type="text" placeholder="https://fb-events.example.com">
+  <label for="token">Shared secret token</label>
+  <input id="token" type="password" placeholder="the FB_CAPTURE_TOKEN value">
+  <button id="save">Save</button>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>
